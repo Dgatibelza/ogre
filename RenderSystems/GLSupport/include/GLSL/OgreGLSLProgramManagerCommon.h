@@ -31,8 +31,10 @@
 #include "OgreGLSupportPrerequisites.h"
 #include "OgreString.h"
 #include "OgreGpuProgramParams.h"
+#include "OgreGLSLProgramCommon.h"
 
 namespace Ogre {
+    class GLSLShaderCommon;
 
     /** Ogre assumes that there are separate programs to deal with but
         GLSL has one program object that represents the active shader
@@ -46,26 +48,27 @@ namespace Ogre {
         stored along with a unique key in a hash_map for quick
         retrieval the next time the program object is required.
     */
-
     class GLSLProgramManagerCommon
     {
     protected:
-        typedef map<String, uint32>::type StringToEnumMap;
+        typedef std::map<String, GpuConstantType> StringToEnumMap;
         StringToEnumMap mTypeEnumMap;
-
-        /**  Convert GL uniform size and type to OGRE constant types
-             and associate uniform definitions together. */
-        virtual void convertGLUniformtoOgreType(uint32 gltype,
-                                        GpuConstantDefinition& defToUpdate) = 0;
 
         /** Parse an individual uniform from a GLSL source file and
             store it in a GpuNamedConstant. */
-        void parseGLSLUniform(
-            String line, GpuNamedConstants& defs,
-            const String& filename, const GpuSharedParametersPtr& sharedParams);
+        void parseGLSLUniform(String line, GpuNamedConstants& defs, const String& filename);
 
+        typedef std::map<uint32, GLSLProgramCommon*> ProgramMap;
+        typedef ProgramMap::iterator ProgramIterator;
+
+        /// container holding previously created program objects
+        ProgramMap mPrograms;
+
+        /// Active shader objects defining the active program object.
+        GLShaderList mActiveShader;
     public:
-        virtual ~GLSLProgramManagerCommon() {}
+        GLSLProgramManagerCommon();
+        virtual ~GLSLProgramManagerCommon();
 
         /** Populate a list of uniforms based on GLSL source and store
             them in GpuNamedConstants.  
@@ -77,6 +80,9 @@ namespace Ogre {
         */
         void extractUniformsFromGLSL(
             const String& src, GpuNamedConstants& constantDefs, const String& filename);
+
+        /// Destroy all programs which referencing this shader
+        void destroyAllByShader(GLSLShaderCommon* shader);
     };
 
 }

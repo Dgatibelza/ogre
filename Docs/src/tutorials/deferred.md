@@ -1,5 +1,5 @@
 # Deferred Shading {#deferred}
-This wiki article is complementary to the deferred shading demo that is part of the Ogre SDK. It will reference the code quite a bit and explain some of the decisions made when implementing the deferred shading framework for the demo.
+This tutorial is complementary to the deferred shading sample that is part of Ogre. It will reference the code quite a bit and explain some of the decisions made when implementing the deferred shading framework for the demo.
 
 @tableofcontents
 
@@ -7,7 +7,7 @@ This wiki article is complementary to the deferred shading demo that is part of 
 Deferred shading is an alternative approach to rendering 3d scenes. The classic rendering approach involves rendering each object and applying lighting passes to it. So, if an ogre head is affected by 6 lights, it will be rendered 6 times, once for each light, in order to accumulate the affection of each light.
 Deferred shading takes another approach : In the beginning, all of the objects render their "lighting related info" to a texture, often called the G-Buffer. This means their colours, normals, depths and any other info that might be relevant to calculating their final colour. Afterwards, the lights in the scene are rendered as geometry (sphere for point light, cone for spotlight and full screen quad for directional light), and they use the G-buffer to calculate the colour contribution of that light to that pixel.
 
-See the links in [Further Reading section](#further) to read more about it. It is recommended to understand deferred shading before reading this article, as the article focuses on implementing it in ogre, and not explaining how it works.
+See the links in @ref further to read more about it. It is recommended to understand deferred shading before reading this article, as the article focuses on implementing it in ogre, and not explaining how it works.
 
 ## Deferred Shading Advantages
 The main reason for using deferred shading is performance related. Classing rendering (also called forward rendering) can, in the worst case, require num_objects * num_lights batches to render a scene. Deferred shading changes that to num_objects + num_lights, which can often be a lot less.
@@ -150,9 +150,6 @@ There are four target passes in this compositor.
 3. Render the post-GBuffer render queue objects
 4. Output the result
 
-### Why do we need four target passes ?
-This is mainly a limitation of Ogre. Ideally, we could use a single target_output pass and do all the passes there. The problem is that material_scheme is at the target scope and not at the pass scope. This is hard to change, because material schemes are resolved during scene preparing time and not during scene rendering. So even if the scope would change, it would not affect the rendering, as the material scheme will not get tested after we switch to it. Perhaps this will be addressed, and then this compositor will get simplified.
-
 ## Rendering the light geometry {#lightgeom}
 The geometry that we want to render to calculate lighting information doesn't really fit in any classic category. It is not really a part of the scene, as the light geometry aren't objects in the world. But it is geometry (not always a quad) that needs to be rendered.
 
@@ -268,6 +265,6 @@ In addition to that, the deferred shading implementation was focused on simplici
 Deferred Shading is an advanced rendering technique, that brings a pretty big implementation challenge along with it. This article, along with the demo, shows that it is possible to implement without relying on hacks and bypassing ogre's systems. Yes, it involves more advanced usage of ogre's APIs and requires a bit of knowledge about what happens behind the scenes, but is in no way impossible.
 
 ## Further reading {#further}
-* [KillZone 2 Deferred Shading overview](http://www.guerrilla-games.com/publications/dr_kz2_rsx_dev07.pdf) - Great resource for understanding deferred shading in general before diving into implemeting it in Ogre.
+* [KillZone 2 Deferred Shading overview](https://d1z4o56rleaq4j.cloudfront.net/downloads/assets/Develop07_Valient_DeferredRenderingInKillzone2.pdf) - Great resource for understanding deferred shading in general before diving into implemeting it in Ogre.
 * [Improving Ogre's Compositor Framework GSoC project page](http://www.ogre3d.org/tikiwiki/tiki-index.php?page=SoC2009+Compositor)
-* [Deferred Rendering Demystified](http://www.gamedev.net/page/reference/index.html/_//feature/fprogramming/deferred-rendering-demystified-r2746) - An article written around this project that explains the design behind the deferred renderer.
+* [Deferred Rendering Demystified](https://www.gamedev.net/articles/programming/graphics/deferred-rendering-demystified-r2746/) - An article written around this project that explains the design behind the deferred renderer.

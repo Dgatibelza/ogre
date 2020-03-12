@@ -27,8 +27,6 @@ THE SOFTWARE.
 */
 #include "OgreStableHeaders.h"
 #include "OgreWorkQueue.h"
-#include "OgreLogManager.h"
-#include "OgreRoot.h"
 #include "OgreTimer.h"
 
 namespace Ogre {
@@ -131,9 +129,7 @@ namespace Ogre {
     {
             OGRE_WQ_LOCK_RW_MUTEX_WRITE(mRequestHandlerMutex);
 
-        RequestHandlerListByChannel::iterator i = mRequestHandlers.find(channel);
-        if (i == mRequestHandlers.end())
-            i = mRequestHandlers.insert(RequestHandlerListByChannel::value_type(channel, RequestHandlerList())).first;
+        RequestHandlerListByChannel::iterator i = mRequestHandlers.emplace(channel, RequestHandlerList()).first;
 
         RequestHandlerList& handlers = i->second;
         bool duplicate = false;
@@ -176,9 +172,7 @@ namespace Ogre {
     //---------------------------------------------------------------------
     void DefaultWorkQueueBase::addResponseHandler(uint16 channel, ResponseHandler* rh)
     {
-        ResponseHandlerListByChannel::iterator i = mResponseHandlers.find(channel);
-        if (i == mResponseHandlers.end())
-            i = mResponseHandlers.insert(ResponseHandlerListByChannel::value_type(channel, ResponseHandlerList())).first;
+        ResponseHandlerListByChannel::iterator i = mResponseHandlers.emplace(channel, ResponseHandlerList()).first;
 
         ResponseHandlerList& handlers = i->second;
         if (std::find(handlers.begin(), handlers.end(), rh) == handlers.end())
@@ -321,6 +315,35 @@ namespace Ogre {
                 }
             }
         }
+    }
+    //---------------------------------------------------------------------
+    bool DefaultWorkQueueBase::abortPendingRequest(RequestID id)
+    {
+        // Request should not exist in idle queue and request queue simultaneously.
+        {
+            OGRE_WQ_LOCK_MUTEX(mRequestMutex);
+            for (RequestQueue::iterator i = mRequestQueue.begin(); i != mRequestQueue.end(); ++i)
+            {
+                if ((*i)->getID() == id)
+                {
+                    (*i)->abortRequest();
+                    return true;
+                }
+            }
+        }
+        {
+            OGRE_WQ_LOCK_MUTEX(mIdleMutex);
+            for (RequestQueue::iterator i = mIdleRequestQueue.begin(); i != mIdleRequestQueue.end(); ++i)
+            {
+                if ((*i)->getID() == id)
+                {
+                    (*i)->abortRequest();
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
     //---------------------------------------------------------------------
     void DefaultWorkQueueBase::abortRequestsByChannel(uint16 channel)
@@ -559,7 +582,7 @@ namespace Ogre {
             if (!r->getAborted())
             {
             // no response, delete request
-            LogManager::getSingleton().stream() << 
+            LogManager::getSingleton().stream(LML_WARNING) <<
                 "DefaultWorkQueueBase('" << mName << "') warning: no handler processed request "
                 << r->getID() << ", channel " << r->getChannel()
                 << ", type " << r->getType();

@@ -53,8 +53,8 @@ namespace Ogre
     class PCZoneFactoryManager;
     class PortalBase;
 
-    typedef vector<SceneNode*>::type NodeList;
-    typedef list<WireBoundingBox*>::type BoxList;
+    typedef std::vector<SceneNode*> NodeList;
+    typedef std::list<WireBoundingBox*> BoxList;
 
     /** Specialized SceneManager that uses Portal-Connected-Zones to divide the scene spatially.
     */
@@ -376,8 +376,6 @@ namespace Ogre
         virtual void findLightsAffectingFrustum(const Camera* camera);
         /// Internal method for creating shadow textures (texture-based shadows)
         virtual void ensureShadowTexturesCreated();
-        /// Internal method for destroying shadow textures (texture-based shadows)
-        virtual void destroyShadowTextures(void);
         /// Internal method for firing the pre caster texture shadows event
         virtual void fireShadowTexturesPreCaster(Light* light, Camera* camera, size_t iteration);
     };

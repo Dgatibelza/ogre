@@ -99,13 +99,13 @@ public:
             mLights[i].animState->addTime(evt.timeSinceLastFrame);
             if (mTwirlLights)
             {
-                mLights[i].light->setDirection(
+                mLights[i].dirnode->setDirection(
                     Quaternion(Degree(ControllerManager::getSingleton().getElapsedTime() * 150 + 360 * i / (float)mLights.size()), Vector3::UNIT_Y) *
-                    Vector3(0,-1,-1).normalisedCopy());
+                    Vector3(0,-1,-1).normalisedCopy(), Node::TS_WORLD);
             }
             else
             {
-                mLights[i].light->setDirection(Vector3::NEGATIVE_UNIT_Y);
+                mLights[i].dirnode->setDirection(Vector3::NEGATIVE_UNIT_Y, Node::TS_WORLD);
             }
         }
         
@@ -122,7 +122,8 @@ protected:
         mTrayMgr->createCheckBox(TL_BOTTOM, DEBUG_MODE_CHECKBOX, "Show Grid", 240)->setChecked(false, false);
 
         // Set our camera to orbit around the origin at a suitable distance
-        mCameraNode->setPosition(0, 100, 600);
+        mCameraMan->setStyle(CS_ORBIT);
+        mCameraMan->setYawPitchDist(Degree(0), Degree(25), 600);
 
         mTrayMgr->showCursor();
 
@@ -168,9 +169,8 @@ protected:
         mSRSSegLightFactory = new RTShaderSRSSegmentedLightsFactory;
         mGen->addSubRenderStateFactory(mSRSSegLightFactory);
         pMainRenderState->addTemplateSubRenderState(
-            mGen->createSubRenderState(RTShaderSRSSegmentedLights::Type));  
-                    
-        
+            mGen->createSubRenderState<RTShaderSRSSegmentedLights>());
+
         mGen->invalidateScheme(Ogre::RTShader::ShaderGenerator::DEFAULT_SCHEME_NAME);
 
         // Make this viewport work with shader generator scheme.
@@ -184,10 +184,13 @@ protected:
         // set the single directional light
         Light* light = mSceneMgr->createLight();
         light->setType(Light::LT_DIRECTIONAL);
-        light->setDirection(Vector3(-1,-1,0).normalisedCopy());
         light->setDiffuseColour(ColourValue(0.1, 0.1, 0.1));
         light->setCastShadows(false);
         
+        auto ln = mSceneMgr->getRootSceneNode()->createChildSceneNode();
+        ln->setDirection(Vector3(-1,-1,0).normalisedCopy());
+        ln->attachObject(light);
+
         for(unsigned int i = 0 ; i < cInitialLightCount ; ++i)
         {
             addSpotLight();
@@ -242,10 +245,11 @@ protected:
         state.light = mSceneMgr->createLight();
         state.light->setCastShadows(false);
         state.light->setType(mLights.size() % 10 ? Light::LT_SPOTLIGHT : Light::LT_POINT);
-        state.light->setDirection(Vector3::NEGATIVE_UNIT_Y);
         state.light->setAttenuation(200,0,0,0);
         state.light->setDiffuseColour(lightColor);
-        state.node->attachObject(state.light);
+        state.dirnode = state.node->createChildSceneNode();
+        state.dirnode->setDirection(Vector3::NEGATIVE_UNIT_Y, Node::TS_WORLD);
+        state.dirnode->attachObject(state.light);
 
         // Attach a flare with the same colour to the light node
         state.bbs = mSceneMgr->createBillboardSet(1);
@@ -323,47 +327,12 @@ protected:
             mTwirlLights = box->isChecked();
         }
     }
-
-    bool mousePressed(const MouseButtonEvent& evt)
-    {
-        if (mTrayMgr->mousePressed(evt)) 
-            return true;
-        if (evt.button == BUTTON_LEFT)
-            // Hide the cursor if user left-clicks in the scene            .
-            mTrayMgr->hideCursor();  
-    
-        return true;
-    }
-
-
-    bool mouseReleased(const MouseButtonEvent& evt)
-    {
-        if (mTrayMgr->mouseReleased(evt)) 
-            return true;
-        if (evt.button == BUTTON_LEFT)
-            // Unhide the cursor if user lets go of LMB.
-            mTrayMgr->showCursor();  
-
-        return true;
-    }
-
-
-    bool mouseMoved(const MouseMotionEvent& evt)
-    {
-        // only rotate the camera if cursor is hidden
-        if (mTrayMgr->isCursorVisible()) 
-            mTrayMgr->mouseMoved(evt);
-        else 
-            mCameraMan->mouseMoved(evt);
-
-        return true;
-    }
-
 private:
 
     struct LightState
     {
         SceneNode* node;
+        SceneNode* dirnode;
         Animation* anim;
         NodeAnimationTrack* track;
         AnimationState* animState;
@@ -371,7 +340,7 @@ private:
         BillboardSet* bbs;
     };
 
-    typedef Ogre::vector<LightState>::type VecLights;
+    typedef std::vector<LightState> VecLights;
     VecLights mLights;  
     bool mTwirlLights;
 

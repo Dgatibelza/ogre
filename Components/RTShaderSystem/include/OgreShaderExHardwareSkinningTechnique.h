@@ -93,6 +93,8 @@ public:
     */
     void setDoBoneCalculations(bool doBoneCalculations);
 
+    void setDoLightCalculations(bool val) { mDoLightCalculations = val; }
+
     /**
     @see SubRenderState::resolveParameters.
     */
@@ -121,6 +123,7 @@ protected:
     bool mScalingShearingSupport;
 
     bool mDoBoneCalculations;
+    bool mDoLightCalculations;
     
     ParameterPtr mParamInPosition;
     ParameterPtr mParamInNormal;
@@ -138,7 +141,6 @@ protected:
     ParameterPtr mParamTempFloat3;
     ParameterPtr mParamLocalPositionWorld;
     ParameterPtr mParamLocalNormalWorld;
-    ParameterPtr mParamLocalNormal;
     //ParameterPtr mParamLocalTangentWorld;
     //ParameterPtr mParamLocalBinormalWorld;
     ParameterPtr mParamOutPositionProj;

@@ -39,7 +39,7 @@ namespace Ogre {
 
     /** RenderTexture for GL FBO
      */
-    class _OgreGL3PlusExport GL3PlusFBORenderTexture: public GLRenderTexture
+    class _OgreGL3PlusExport GL3PlusFBORenderTexture : public GLRenderTexture
     {
     public:
         GL3PlusFBORenderTexture(GL3PlusFBOManager *manager, const String &name, const GLSurfaceDesc &target, bool writeGamma, uint fsaa);
@@ -53,6 +53,9 @@ namespace Ogre {
         virtual bool attachDepthBuffer( DepthBuffer *depthBuffer );
         virtual void detachDepthBuffer();
         virtual void _detachDepthBuffer();
+
+        GLContext* getContext() const { return mFB.getContext(); }
+        GLFrameBufferObjectCommon* getFBO() { return &mFB; }
     protected:
         GL3PlusFrameBufferObject mFB;
     };
@@ -65,15 +68,6 @@ namespace Ogre {
         GL3PlusFBOManager(GL3PlusRenderSystem* renderSystem);
         ~GL3PlusFBOManager();
 
-        /** Bind a certain render target if it is a FBO. If it is not a FBO, bind the
-            main frame buffer.
-        */
-        void bind(RenderTarget *target);
-
-        /** Unbind a certain render target. No-op for FBOs.
-         */
-        void unbind(RenderTarget *target) {};
-
         /** Get best depth and stencil supported for given internalFormat
          */
         void getBestDepthStencil(PixelFormat internalFormat, GLenum *depthFormat, GLenum *stencilFormat);
@@ -83,30 +77,19 @@ namespace Ogre {
         virtual GL3PlusFBORenderTexture *createRenderTexture(const String &name,
                                                              const GLSurfaceDesc &target, bool writeGamma, uint fsaa);
 
-        /** Create a multi render target
-         */
-        virtual MultiRenderTarget* createMultiRenderTarget(const String & name);
-
         /** Request a render buffer. If format is GL_NONE, return a zero buffer.
          */
         GLSurfaceDesc requestRenderBuffer(GLenum format, uint32 width, uint32 height, uint fsaa);
-        /** Get a FBO without depth/stencil for temporary use, like blitting between textures.
-         */
-        GLuint getTemporaryFBO(size_t i);
 
         GL3PlusStateCacheManager* getStateCacheManager();
     private:
-        /** Temporary FBO identifier
-         */
-        std::vector<GLuint> mTempFBO;
-
         GL3PlusRenderSystem* mRenderSystem;
 
         /** Detect allowed FBO formats */
         void detectFBOFormats();
         GLuint _tryFormat(GLenum depthFormat, GLenum stencilFormat);
         bool _tryPackedFormat(GLenum packedFormat);
-        void _createTempFramebuffer(int ogreFormat, GLuint internalFormat, GLuint fmt, GLenum dataType, GLuint &fb, GLuint &tid);
+        void _createTempFramebuffer(GLuint internalFormat, GLuint fmt, GLenum dataType, GLuint &fb, GLuint &tid);
     };
 }
 

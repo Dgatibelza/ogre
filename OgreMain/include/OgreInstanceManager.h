@@ -95,10 +95,10 @@ namespace Ogre
             }
         };
 
-        typedef vector<InstanceBatch*>::type        InstanceBatchVec;   //vec[batchN] = Batch
-        typedef map<String, InstanceBatchVec>::type InstanceBatchMap;   //map[materialName] = Vec
+        typedef std::vector<InstanceBatch*>        InstanceBatchVec;   //vec[batchN] = Batch
+        typedef std::map<String, InstanceBatchVec> InstanceBatchMap;   //map[materialName] = Vec
 
-        typedef map<String, BatchSettings>::type    BatchSettingsMap;
+        typedef std::map<String, BatchSettings>    BatchSettingsMap;
 
         const String            mName;                  //Not the name of the mesh
         MeshPtr                 mMeshReference;
@@ -138,8 +138,8 @@ namespace Ogre
 
         /** @see defragmentBatches overload, this takes care of an array of batches
             for a specific material */
-        void defragmentBatches( bool optimizeCull, vector<InstancedEntity*>::type &entities,
-                                vector<Ogre::Vector4>::type &usedParams,
+        void defragmentBatches( bool optimizeCull, std::vector<InstancedEntity*> &entities,
+                                std::vector<Ogre::Vector4> &usedParams,
                                 InstanceBatchVec &fragmentedBatches );
 
         /** @see setSetting. This function helps it by setting the given parameter to all batches
@@ -220,7 +220,7 @@ namespace Ogre
         */
         size_t getMaxOrBestNumInstancesPerBatch( const String &materialName, size_t suggestedSize, uint16 flags );
 
-        /** @copydoc SceneManager::createInstancedEntity */
+        /// Creates an InstancedEntity
         InstancedEntity* createInstancedEntity( const String &materialName );
 
         /** This function can be useful to improve CPU speed after having too many instances
@@ -279,8 +279,7 @@ namespace Ogre
         /** Returns true if settings were already created for the given material name.
             If false is returned, it means getSetting will return default settings.
         */
-        bool hasSettings( const String &materialName ) const
-        { return mBatchSettings.find( materialName ) != mBatchSettings.end(); }
+        bool hasSettings( const String &materialName ) const;
 
         /** @copydoc InstanceBatch::setStaticAndUpdate */
         void setBatchesAsStaticAndUpdate( bool bStatic );
@@ -306,15 +305,7 @@ namespace Ogre
             setCustomParameter), but there's no synchronization mechanism when
             multithreading or creating more instances, that's up to the user.
         */
-        InstanceBatchIterator getInstanceBatchIterator( const String &materialName ) const
-        {
-            InstanceBatchMap::const_iterator it = mInstanceBatches.find( materialName );
-            if(it != mInstanceBatches.end())
-                return InstanceBatchIterator( it->second.begin(), it->second.end() );
-            else
-                OGRE_EXCEPT(Exception::ERR_INVALID_STATE, "Cannot create instance batch iterator. "
-                            "Material " + materialName + " cannot be found.", "InstanceManager::getInstanceBatchIterator");
-        }
+        InstanceBatchIterator getInstanceBatchIterator( const String &materialName ) const;
     };
 } // namespace Ogre
 

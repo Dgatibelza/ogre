@@ -52,8 +52,8 @@ namespace Ogre {
             };
 
         protected:
-            HardwareBufferManagerBase* mMgr;
             IndexType mIndexType;
+            HardwareBufferManagerBase* mMgr;
             size_t mNumIndexes;
             size_t mIndexSize;
 
@@ -74,8 +74,8 @@ namespace Ogre {
             // NB subclasses should override lock, unlock, readData, writeData
     };
     
-    /** Locking helper. */    
-    typedef HardwareBufferLockGuard<HardwareIndexBufferSharedPtr> HardwareIndexBufferLockGuard;
+    /// @deprecated use HardwareBufferLockGuard directly
+    OGRE_DEPRECATED typedef HardwareBufferLockGuard HardwareIndexBufferLockGuard;
 
     /** @} */
     /** @} */

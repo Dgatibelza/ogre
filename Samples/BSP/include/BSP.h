@@ -4,10 +4,6 @@
 #include "SdkSample.h"
 #include "OgreFileSystemLayer.h"
 
-#if OGRE_PLATFORM == OGRE_PLATFORM_APPLE || OGRE_PLATFORM == OGRE_PLATFORM_APPLE_IOS
-#include "macUtils.h"
-#endif
-
 using namespace Ogre;
 using namespace OgreBites;
 
@@ -24,15 +20,6 @@ class _OgreSampleClassExport Sample_BSP : public SdkSample
         mInfo["Category"] = "Geometry";
     }
 
-    void testCapabilities(const RenderSystemCapabilities* caps)
-    {
-        if (!caps->hasCapability(RSC_VERTEX_PROGRAM) || !caps->hasCapability(RSC_FRAGMENT_PROGRAM))
-        {
-            OGRE_EXCEPT(Exception::ERR_NOT_IMPLEMENTED, "Your graphics card does not support vertex or fragment shaders, "
-                        "so you cannot run this sample. Sorry!", "Sample_BSP::testCapabilities");
-        }
-    }
-
     StringVector getRequiredPlugins()
     {
         StringVector names;
@@ -44,34 +31,8 @@ class _OgreSampleClassExport Sample_BSP : public SdkSample
 
     void locateResources()
     {
-        // load the Quake archive location and map name from a config file
-        ConfigFile cf;
-        cf.load(mFSLayer->getConfigFilePath("quakemap.cfg"));
-        mArchive = cf.getSetting("Archive");
-        mMap = cf.getSetting("Map");
-
-#if OGRE_PLATFORM == OGRE_PLATFORM_APPLE || OGRE_PLATFORM == OGRE_PLATFORM_APPLE_IOS
-    Ogre::String bundle = Ogre::macBundlePath();
-#elif OGRE_PLATFORM == OGRE_PLATFORM_LINUX
-    char* env_SNAP = getenv("SNAP");
-    Ogre::String bundle(env_SNAP ? env_SNAP : "");
-#endif
-
-#if OGRE_PLATFORM == OGRE_PLATFORM_APPLE || OGRE_PLATFORM == OGRE_PLATFORM_APPLE_IOS
-        // OS X does not set the working directory relative to the app,
-        // In order to make things portable on OS X we need to provide
-        // the loading with it's own bundle path location
-        if (!Ogre::StringUtil::startsWith(mArchive, "/", false)) // only adjust relative dirs
-            mArchive = bundle + "/" + mArchive;
-#elif OGRE_PLATFORM == OGRE_PLATFORM_LINUX
-            // With Ubuntu Snappy changes absolute paths are relative to the snap package.
-            if (Ogre::StringUtil::startsWith(mArchive, "/", false)) // only adjust absolute dirs
-                mArchive = bundle + mArchive;
-#endif
-
-        // add the Quake archive to the world resource group
-        ResourceGroupManager::getSingleton().addResourceLocation(mArchive, "Zip",
-                                                                 ResourceGroupManager::getSingleton().getWorldResourceGroupName(), true);
+    	// Pick a new resource group so Q3Shader parser is correctly registered
+    	ResourceGroupManager::getSingleton().setWorldResourceGroupName("BSPWorld");
     }
 
     void createSceneManager()
@@ -92,7 +53,7 @@ class _OgreSampleClassExport Sample_BSP : public SdkSample
 
         // associate the world geometry with the world resource group, and then load the group
         ResourceGroupManager& rgm = ResourceGroupManager::getSingleton();
-        rgm.linkWorldGeometryToResourceGroup(rgm.getWorldResourceGroupName(), mMap, mSceneMgr);
+        rgm.linkWorldGeometryToResourceGroup(rgm.getWorldResourceGroupName(), "maps/oa_rpg3dm2.bsp", mSceneMgr);
         rgm.initialiseResourceGroup(rgm.getWorldResourceGroupName());
         rgm.loadResourceGroup(rgm.getWorldResourceGroupName(), false);
 
@@ -103,8 +64,8 @@ class _OgreSampleClassExport Sample_BSP : public SdkSample
     {
         // unload the map so we don't interfere with subsequent samples
         ResourceGroupManager& rgm = ResourceGroupManager::getSingleton();
-        rgm.unloadResourceGroup(rgm.getWorldResourceGroupName());
-        rgm.removeResourceLocation(mArchive, ResourceGroupManager::getSingleton().getWorldResourceGroupName());
+        rgm.clearResourceGroup(rgm.getWorldResourceGroupName());
+        rgm.setWorldResourceGroupName(ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME);
     }
 
     void setupView()
@@ -115,21 +76,15 @@ class _OgreSampleClassExport Sample_BSP : public SdkSample
         mCamera->setNearClipDistance(4);
         mCamera->setFarClipDistance(4000);
 
-        // set a random player starting point
-        ViewPoint vp = mSceneMgr->getSuggestedViewpoint(true);
-
         // Quake uses the Z axis as the up axis, so make necessary adjustments
         mCameraNode->setFixedYawAxis(true, Vector3::UNIT_Z);
         mCameraNode->pitch(Degree(90));
 
-        mCameraNode->setPosition(vp.position);
-        mCameraNode->rotate(vp.orientation);
+        // specific for this map
+        mCameraNode->setPosition(Vector3(0, 0, 340));
 
         mCameraMan->setTopSpeed(350);   // make the camera move a bit faster
     }
-
-    String mArchive;
-    String mMap;
 };
 
 #endif

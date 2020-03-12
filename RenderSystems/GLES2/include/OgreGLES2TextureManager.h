@@ -32,7 +32,7 @@ THE SOFTWARE.
 #include "OgreGLES2Prerequisites.h"
 #include "OgreTextureManager.h"
 #include "OgreGLES2Texture.h"
-#include "OgreGLES2Support.h"
+#include "OgreGLNativeSupport.h"
 
 namespace Ogre {
     /** GL ES-specific implementation of a TextureManager */
@@ -41,8 +41,6 @@ namespace Ogre {
         public:
             GLES2TextureManager(GLES2RenderSystem* renderSystem);
             virtual ~GLES2TextureManager();
-
-            GLuint getWarningTextureID() { return mWarningTextureID; }
 
             /// @copydoc TextureManager::getNativeFormat
             PixelFormat getNativeFormat(TextureType ttype, PixelFormat format, int usage);
@@ -58,11 +56,7 @@ namespace Ogre {
                              const String& group, bool isManual, ManualResourceLoader* loader, 
                              const NameValuePairList* createParams);
         
-        /// Internal method to create a warning texture (bound when a texture unit is blank)
-        void createWarningTexture();
-        
         GLES2RenderSystem* mRenderSystem;
-        GLuint mWarningTextureID;
     };
 }
 

@@ -32,12 +32,8 @@ THE SOFTWARE.
 #include "OgreStringConverter.h"
 #include "OgreRoot.h"
 
-#include "OgreGLES2Prerequisites.h"
-#include "OgreGLES2RenderSystem.h"
-
 #include "OgreWin32EGLSupport.h"
 #include "OgreWin32EGLWindow.h"
-#include "OgreWin32EGLRenderTexture.h"
 
 #include "OgreGLUtil.h"
 
@@ -47,7 +43,8 @@ namespace Ogre {
         return new Win32EGLSupport(profile);
     }
 
-    Win32EGLSupport::Win32EGLSupport()
+    Win32EGLSupport::Win32EGLSupport(int profile)
+		: EGLSupport(profile)
     {
         //RECT windowRect;
         //GetClientRect(mNativeDisplay, &windowRect);
@@ -62,9 +59,9 @@ namespace Ogre {
             if (DevMode.dmBitsPerPel < 16)
                 continue;
 
-            mCurrentMode.first.first = DevMode.dmPelsWidth; 
-            mCurrentMode.first.second = DevMode.dmPelsHeight; 
-            mCurrentMode.second = 0;
+            mCurrentMode.width = DevMode.dmPelsWidth;
+            mCurrentMode.height = DevMode.dmPelsHeight;
+            mCurrentMode.refreshRate = 0;
             mOriginalMode = mCurrentMode;
             mVideoModes.push_back(mCurrentMode);
         }
@@ -91,15 +88,11 @@ namespace Ogre {
             if (caveat != EGL_SLOW_CONFIG)
             {
                 getGLConfigAttrib(glConfigs[config], EGL_SAMPLES, &samples);
-                mSampleLevels.push_back(StringConverter::toString(samples));
+                mFSAALevels.push_back(short(samples));
             }
         }
 
         free(glConfigs);
-
-        removeDuplicates(mSampleLevels);
-
-
     }
 
     Win32EGLSupport::~Win32EGLSupport()
@@ -121,41 +114,6 @@ namespace Ogre {
 
     void Win32EGLSupport::switchMode( uint& width, uint& height, short& frequency )
     {
-        if (!mRandr)
-            return;
-
-        int size = 0;
-        int newSize = -1;
-
-        VideoModes::iterator mode;
-        VideoModes::iterator end = mVideoModes.end();
-        VideoMode *newMode = 0;
-
-        for(mode = mVideoModes.begin(); mode != end; size++)
-        {
-            if (mode->first.first >= static_cast<int>(width) &&
-                mode->first.second >= static_cast<int>(height))
-            {
-                if (!newMode ||
-                    mode->first.first < newMode->first.first ||
-                    mode->first.second < newMode->first.second)
-                {
-                    newSize = size;
-                    newMode = &(*mode);
-                }
-            }
-
-            VideoMode* lastMode = &(*mode);
-
-            while (++mode != end && mode->first == lastMode->first)
-            {
-                if (lastMode == newMode && mode->second == frequency)
-                {
-                    newMode = &(*mode);
-                }
-            }
-        }
-
         //todo
     }
 

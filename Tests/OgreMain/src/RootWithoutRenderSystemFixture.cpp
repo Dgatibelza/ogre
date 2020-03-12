@@ -7,8 +7,8 @@
 
 #include "RootWithoutRenderSystemFixture.h"
 
-#include <Ogre.h>
-#include <OgreDefaultHardwareBufferManager.h>
+#include "Ogre.h"
+#include "OgreDefaultHardwareBufferManager.h"
 
 using namespace Ogre;
 
@@ -43,7 +43,7 @@ void RootWithoutRenderSystemFixture::SetUp()
 
 void RootWithoutRenderSystemFixture::TearDown()
 {
-    delete mHBM;
     delete mRoot;
+    delete mHBM;
     delete mFSLayer;
 }

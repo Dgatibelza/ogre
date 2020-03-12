@@ -31,7 +31,6 @@ THE SOFTWARE.
 #include "OgreEAGLES2Context.h"
 
 #include "OgreRoot.h"
-#include "OgreWindowEventUtilities.h"
 #include "OgreGLES2RenderSystem.h"
 #include "OgreGLES2PixelFormat.h"
 #include "OgreViewport.h"
@@ -40,8 +39,19 @@ THE SOFTWARE.
 #import <UIKit/UIWindow.h>
 #import <UIKit/UIGraphics.h>
 #include "ARCMacros.h"
+#include "OgreDepthBuffer.h"
 
 namespace Ogre {
+
+    struct EAGLContextGuard
+    {
+        EAGLContextGuard(EAGLContext* ctx) : mPrevContext([EAGLContext currentContext]) { if(ctx != mPrevContext) [EAGLContext setCurrentContext:ctx]; }
+        ~EAGLContextGuard() { [EAGLContext setCurrentContext:mPrevContext]; }
+    private:
+         EAGLContext *mPrevContext;
+    };
+
+
     EAGL2Window::EAGL2Window(EAGL2Support *glsupport)
         :   mClosed(false),
             mVisible(false),
@@ -60,6 +70,7 @@ namespace Ogre {
         mIsFullScreen = true;
         mActive = true;
         mHwGamma = false;
+        mDepthBufferPoolId = DepthBuffer::POOL_NO_DEPTH;
     }
 
     EAGL2Window::~EAGL2Window()
@@ -85,9 +96,7 @@ namespace Ogre {
         mActive = false;
 
         if (!mIsExternal)
-        {
-            WindowEventUtilities::_removeRenderWindow(this);
-        
+        {        
             SAFE_ARC_RELEASE(mWindow);
             mWindow = nil;
         }
@@ -124,7 +133,9 @@ namespace Ogre {
         if(mWidth == widthPx && mHeight == heightPx)
             return;
         
-        // Destroy and recreate the framebuffer with new dimensions 
+        // Destroy and recreate the framebuffer with new dimensions
+        EAGLContextGuard ctx_guard(mContext->getContext());
+        
         mContext->destroyFramebuffer();
         
         mWidth = widthPx;
@@ -140,25 +151,30 @@ namespace Ogre {
     
 	void EAGL2Window::windowMovedOrResized()
 	{
-		CGRect frame = [mView frame];
-        mWidth = _getPixelFromPoint(frame.size.width);
-        mHeight = _getPixelFromPoint(frame.size.height);
-        mLeft = _getPixelFromPoint(frame.origin.x);
-        mTop = _getPixelFromPoint(frame.origin.y + frame.size.height);
+        CGRect frame = [mView frame];
+        CGFloat width  = _getPixelFromPoint(frame.size.width);
+        CGFloat height = _getPixelFromPoint(frame.size.height);
+        CGFloat left   = _getPixelFromPoint(frame.origin.x);
+        CGFloat top    = _getPixelFromPoint(frame.origin.y);
+        
+        if(mWidth == width && mHeight == height && mLeft == left && mTop == top)
+            return;
+        
+        EAGLContextGuard ctx_guard(mContext->getContext());
+        mContext->destroyFramebuffer();
+
+        mWidth  = width;
+        mHeight = height;
+        mLeft   = left;
+        mTop    = top;
+
+        mContext->createFramebuffer();
 
         for (ViewportList::iterator it = mViewportList.begin(); it != mViewportList.end(); ++it)
         {
             (*it).second->_updateDimensions();
         }
 	}
-
-    void EAGL2Window::_beginUpdate(void)
-    {
-        // Call the base class method first
-        RenderTarget::_beginUpdate();
-
-        mContext->bindSampleFramebuffer();
-    }
 
     void EAGL2Window::createNativeWindow(uint widthPt, uint heightPt, const NameValuePairList *miscParams)
     {
@@ -174,7 +190,7 @@ namespace Ogre {
             mWindow = [[UIWindow alloc] initWithFrame:CGRectMake(0, 0, widthPt, heightPt)];
         }
         
-        OgreAssert(mWindow != nil, "EAGL2Window: Failed to create native window");
+        OgreAssert(mWindow || mUsingExternalViewController, "EAGL2Window: Failed to obtain required native window");
         
         // Set up the view
         if(!mUsingExternalView)
@@ -224,7 +240,7 @@ namespace Ogre {
             
             if ((option = miscParams->find("externalSharegroup")) != miscParams->end())
             {
-                group = (__bridge EAGLSharegroup *)(void*)StringConverter::parseUnsignedLong(option->second);
+                group = (__bridge EAGLSharegroup *)(void*)StringConverter::parseSizeT(option->second);
                 LogManager::getSingleton().logMessage("iOS: Using an external EAGLSharegroup");
             }
             else
@@ -242,19 +258,17 @@ namespace Ogre {
         
         OgreAssert(mContext != nil, "EAGL2Window: Failed to create OpenGL ES context");
 
-        if(!mUsingExternalViewController)
-            [mWindow addSubview:mViewController.view];
-        
         mViewController.mGLSupport = mGLSupport;
         
         if(!mUsingExternalViewController)
+        {
+            [mWindow addSubview:mViewController.view];
             mWindow.rootViewController = mViewController;
+            [mWindow makeKeyAndVisible];
+        }
         
         if(!mUsingExternalView)
             SAFE_ARC_RELEASE(mView);
-    
-        if(!mUsingExternalViewController)
-            [mWindow makeKeyAndVisible];
         
         // Obtain effective view size and scale
         CGSize sz = mView.frame.size;
@@ -287,14 +301,6 @@ namespace Ogre {
         mIsFullScreen = fullScreen;
         mName = name;
         
-        // Check the configuration. This may be overridden later by the value sent via miscParams
-        ConfigOptionMap::const_iterator configOpt;
-        ConfigOptionMap::const_iterator configEnd = mGLSupport->getConfigOptions().end();
-        if ((configOpt = mGLSupport->getConfigOptions().find("Content Scaling Factor")) != configEnd)
-        {
-            mContentScalingFactor = StringConverter::parseReal(configOpt->second.currentValue);
-        }
-
         if (miscParams)
         {
             NameValuePairList::const_iterator opt;
@@ -338,21 +344,21 @@ namespace Ogre {
 
             if ((opt = miscParams->find("externalWindowHandle")) != end)
             {
-                mWindow = (__bridge UIWindow *)(void*)StringConverter::parseUnsignedLong(opt->second);
+                mWindow = (__bridge UIWindow *)(void*)StringConverter::parseSizeT(opt->second);
                 mIsExternal = true;
                 LogManager::getSingleton().logMessage("iOS: Using an external window handle");
             }
         
             if ((opt = miscParams->find("externalViewHandle")) != end)
             {
-                mView = (__bridge EAGL2View *)(void*)StringConverter::parseUnsignedLong(opt->second);
+                mView = (__bridge EAGL2View *)(void*)StringConverter::parseSizeT(opt->second);
                 mUsingExternalView = true;
                 LogManager::getSingleton().logMessage("iOS: Using an external view handle");
             }
         
             if ((opt = miscParams->find("externalViewControllerHandle")) != end)
             {
-                mViewController = (__bridge EAGL2ViewController *)(void*)StringConverter::parseUnsignedLong(opt->second);
+                mViewController = (__bridge EAGL2ViewController *)(void*)StringConverter::parseSizeT(opt->second);
                 if(mViewController.view != nil)
                     mView = (EAGL2View *)mViewController.view;
                 mUsingExternalViewController = true;
@@ -382,7 +388,7 @@ namespace Ogre {
         GLenum attachments[3];
         unsigned int buffers = mContext->mDiscardBuffers;
         
-        if(buffers & FBT_COLOUR)
+        if((buffers & FBT_COLOUR) && mContext->mIsMultiSampleSupported && mContext->mNumSamples > 0)
         {
             attachments[attachmentCount++] = GL_COLOR_ATTACHMENT0;
         }
@@ -422,9 +428,7 @@ namespace Ogre {
         if ([mContext->getContext() presentRenderbuffer:GL_RENDERBUFFER] == NO)
         {
             glGetError();
-            OGRE_EXCEPT(Exception::ERR_RENDERINGAPI_ERROR,
-                        "Failed to swap buffers in ",
-                        __FUNCTION__);
+            OGRE_EXCEPT(Exception::ERR_RENDERINGAPI_ERROR, "Failed to swap buffers in ");
         }
     }
 
@@ -435,6 +439,12 @@ namespace Ogre {
 			*static_cast<GLContext**>(pData) = mContext;
 			return;
 		}
+
+        if( name == "GLFBO" )
+        {
+            *static_cast<GLuint*>(pData) = (mContext->mIsMultiSampleSupported && mContext->mNumSamples>0) ? mContext->mSampleFramebuffer : mContext->mViewFramebuffer;
+            return;
+        }
 
         if( name == "SHAREGROUP" )
 		{
@@ -467,7 +477,7 @@ namespace Ogre {
         || dst.getWidth() != src.getWidth() || dst.getHeight() != src.getHeight() || dst.getDepth() != 1
         || dst.getWidth() != dst.rowPitch /* GLES2 does not support GL_PACK_ROW_LENGTH, nor iOS supports GL_NV_pack_subimage */)
 		{
-			OGRE_EXCEPT(Exception::ERR_INVALIDPARAMS, "Invalid box.", __FUNCTION__ );
+			OGRE_EXCEPT(Exception::ERR_INVALIDPARAMS, "Invalid box.");
 		}
 
 		if (buffer == FB_AUTO)

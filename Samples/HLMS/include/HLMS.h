@@ -2,8 +2,8 @@
 #define __HLMS_H__
 
 #include "SdkSample.h"
-#include <OgreHlmsManager.h>
-#include <OgreHlmsPbsMaterial.h>
+#include "OgreHlmsManager.h"
+#include "OgreHlmsPbsMaterial.h"
 
 using namespace Ogre;
 using namespace OgreBites;
@@ -22,8 +22,8 @@ public:
 
 private:
 	Ogre::HlmsManager* mHlmsManager;
-	Ogre::vector<Ogre::PbsMaterial*>::type mPBSMaterialList;
-	Ogre::vector<String>::type mMaterialList;
+	std::vector<Ogre::PbsMaterial*> mPBSMaterialList;
+	std::vector<String> mMaterialList;
 	Ogre::SceneNode* mLightNodes[3];
 	Ogre::MeshPtr mFloor;
 
@@ -62,7 +62,7 @@ protected:
 		lightNode->attachObject(light);
 		light->setPowerScale(1.0f);
 		light->setType(Ogre::Light::LT_DIRECTIONAL);
-		light->setDirection(Ogre::Vector3(-1, -1, -1).normalisedCopy());
+		lightNode->setDirection(Ogre::Vector3(-1, -1, -1).normalisedCopy());
 		mLightNodes[0] = lightNode;
 
 		mSceneMgr->setAmbientLight(Ogre::ColourValue(0.3f, 0.5f, 0.7f));
@@ -75,7 +75,7 @@ protected:
 		light->setPowerScale(Ogre::Math::PI);
 		light->setType(Ogre::Light::LT_SPOTLIGHT);
 		lightNode->setPosition(-10.0f, 10.0f, 10.0f);
-		light->setDirection(Ogre::Vector3(1, -1, -1).normalisedCopy());
+		lightNode->setDirection(Ogre::Vector3(1, -1, -1).normalisedCopy());
 		mLightNodes[1] = lightNode;
 
 		light = mSceneMgr->createLight();
@@ -86,7 +86,7 @@ protected:
 		light->setPowerScale(Ogre::Math::PI);
 		light->setType(Ogre::Light::LT_SPOTLIGHT);
 		lightNode->setPosition(10.0f, 10.0f, -10.0f);
-		light->setDirection(Ogre::Vector3(-1, -1, 1).normalisedCopy());
+		lightNode->setDirection(Ogre::Vector3(-1, -1, 1).normalisedCopy());
 		mLightNodes[2] = lightNode;
 
 
@@ -157,8 +157,10 @@ protected:
 			}
 		}
 
+		mCameraMan->setStyle(CS_ORBIT);
+		mTrayMgr->showCursor();
+		mCameraMan->setYawPitchDist(Degree(0), Degree(25), 20);
 		mCameraMan->setTopSpeed(5);
-        mCameraNode->setPosition(0, 5, 20);
 		mCamera->setNearClipDistance(1);
     }
 

@@ -26,7 +26,6 @@ THE SOFTWARE.
 -----------------------------------------------------------------------------
 */
 #include "OgreBspSceneManager.h"
-#include "OgreBspResourceManager.h"
 #include "OgreBspNode.h"
 #include "OgreException.h"
 #include "OgreRenderSystem.h"
@@ -44,7 +43,7 @@ THE SOFTWARE.
 #include "OgreTechnique.h"
 #include "OgrePass.h"
 #include "OgreMaterialManager.h"
-
+#include "OgreSceneLoaderManager.h"
 
 #include <fstream>
 
@@ -57,11 +56,6 @@ namespace Ogre {
         // Set features for debugging render
         mShowNodeAABs = false;
 
-        // No sky by default
-        mSkyPlaneEnabled = false;
-        mSkyBoxEnabled = false;
-        mSkyDomeEnabled = false;
-
         mLevel.reset();
 
     }
@@ -71,11 +65,7 @@ namespace Ogre {
         return BspSceneManagerFactory::FACTORY_TYPE_NAME;
     }
     //-----------------------------------------------------------------------
-    BspSceneManager::~BspSceneManager()
-    {
-        freeMemory();
-        mLevel.reset();
-    }
+    BspSceneManager::~BspSceneManager() {}
     //-----------------------------------------------------------------------
     size_t BspSceneManager::estimateWorldGeometry(const String& filename)
     {
@@ -92,73 +82,25 @@ namespace Ogre {
     //-----------------------------------------------------------------------
     void BspSceneManager::setWorldGeometry(const String& filename)
     {
-        mLevel.reset();
-        // Check extension is .bsp
-        char extension[6];
-        size_t pos = filename.find_last_of(".");
-        if( pos == String::npos )
-            OGRE_EXCEPT(
-                Exception::ERR_INVALIDPARAMS,
-                "Unable to load world geometry. Invalid extension (must be .bsp).",
-                "BspSceneManager::setWorldGeometry");
-
-        strncpy(extension, filename.substr(pos + 1, filename.length() - pos).c_str(), 5);
-        extension[5] = 0;
-
-#if  OGRE_COMPILER == OGRE_COMPILER_MSVC
-        if (_stricmp(extension, "bsp"))
-#else
-        if (stricmp(extension, "bsp"))
-#endif
-            OGRE_EXCEPT(Exception::ERR_INVALIDPARAMS,
-            "Unable to load world geometry. Invalid extension (must be .bsp).",
-            "BspSceneManager::setWorldGeometry");
-
-        // Load using resource manager
-        mLevel = static_pointer_cast<BspLevel>(BspResourceManager::getSingleton().load(filename,
-            ResourceGroupManager::getSingleton().getWorldResourceGroupName()));
-
-        if (mLevel->isSkyEnabled())
-        {
-            // Quake3 is always aligned with Z upwards
-            Quaternion q;
-            q.FromAngleAxis(Radian(Math::HALF_PI), Vector3::UNIT_X);
-            // Also draw last, and make close to camera (far clip plane is shorter)
-            setSkyDome(true, mLevel->getSkyMaterialName(),
-                mLevel->getSkyCurvature(), 12, 2000, false, q);
-        }
-        else
-        {
-            setSkyDome(false, BLANKSTRING);
-        }
-
-        // Init static render operation
-        mRenderOp.vertexData = mLevel->mVertexData;
-        // index data is per-frame
-        mRenderOp.indexData = OGRE_NEW IndexData();
-        mRenderOp.indexData->indexStart = 0;
-        mRenderOp.indexData->indexCount = 0;
-        // Create enough index space to render whole level
-        mRenderOp.indexData->indexBuffer = HardwareBufferManager::getSingleton()
-            .createIndexBuffer(
-                HardwareIndexBuffer::IT_32BIT, // always 32-bit
-                mLevel->mNumIndexes, 
-                HardwareBuffer::HBU_DYNAMIC_WRITE_ONLY_DISCARDABLE, false);
-
-        mRenderOp.operationType = RenderOperation::OT_TRIANGLE_LIST;
-        mRenderOp.useIndexes = true;
-
-
+        SceneLoaderManager::getSingleton().load(
+            filename, ResourceGroupManager::getSingleton().getWorldResourceGroupName(),
+            getRootSceneNode());
     }
     //-----------------------------------------------------------------------
     void BspSceneManager::setWorldGeometry(DataStreamPtr& stream, 
         const String& typeName)
     {
-        mLevel.reset();
+        SceneLoaderManager::getSingleton().load(
+            stream, ResourceGroupManager::getSingleton().getWorldResourceGroupName(),
+            getRootSceneNode());
+    }
 
-        // Load using resource manager
-        mLevel = static_pointer_cast<BspLevel>(BspResourceManager::getSingleton().load(stream,
-            ResourceGroupManager::getSingleton().getWorldResourceGroupName()));
+    void BspSceneManager::setLevel(const BspLevelPtr& level)
+    {
+        mLevel = level;
+
+        if(!mLevel)
+            return;
 
         if (mLevel->isSkyEnabled())
         {
@@ -173,24 +115,6 @@ namespace Ogre {
         {
             setSkyDome(false, BLANKSTRING);
         }
-
-        // Init static render operation
-        mRenderOp.vertexData = mLevel->mVertexData;
-        // index data is per-frame
-        mRenderOp.indexData = OGRE_NEW IndexData();
-        mRenderOp.indexData->indexStart = 0;
-        mRenderOp.indexData->indexCount = 0;
-        // Create enough index space to render whole level
-        mRenderOp.indexData->indexBuffer = HardwareBufferManager::getSingleton()
-            .createIndexBuffer(
-                HardwareIndexBuffer::IT_32BIT, // always 32-bit
-                mLevel->mNumIndexes, 
-                HardwareBuffer::HBU_DYNAMIC_WRITE_ONLY_DISCARDABLE, false);
-
-        mRenderOp.operationType = RenderOperation::OT_TRIANGLE_LIST;
-        mRenderOp.useIndexes = true;
-
-
     }
     //-----------------------------------------------------------------------
     void BspSceneManager::_findVisibleObjects(Camera* cam, 
@@ -227,60 +151,22 @@ namespace Ogre {
         if (!isRenderQueueToBeProcessed(mWorldGeometryRenderQueue))
             return;
 
-        // Cache vertex/face data first
-        vector<StaticFaceGroup*>::type::const_iterator faceGrpi;
-        static RenderOperation patchOp;
-        
-        // no world transform required
-        mDestRenderSystem->_setWorldMatrix(Matrix4::IDENTITY);
-        // Set view / proj
-        setViewMatrix(mCachedViewMatrix);
-        mDestRenderSystem->_setProjectionMatrix(mCameraInProgress->getProjectionMatrixRS());
-
         // For each material in turn, cache rendering data & render
         MaterialFaceGroupMap::const_iterator mati;
-
         for (mati = mMatFaceGroupMap.begin(); mati != mMatFaceGroupMap.end(); ++mati)
         {
             // Get Material
             Material* thisMaterial = mati->first;
             thisMaterial->touch();
-            // Empty existing cache
-            mRenderOp.indexData->indexCount = 0;
-            // lock index buffer ready to receive data
-            unsigned int* pIdx = static_cast<unsigned int*>(
-                mRenderOp.indexData->indexBuffer->lock(HardwareBuffer::HBL_DISCARD));
-
-            for (faceGrpi = mati->second.begin(); faceGrpi != mati->second.end(); ++faceGrpi)
-            {
-                // Cache each
-                unsigned int numelems = cacheGeometry(pIdx, *faceGrpi);
-                mRenderOp.indexData->indexCount += numelems;
-                pIdx += numelems;
-            }
-            // Unlock the buffer
-            mRenderOp.indexData->indexBuffer->unlock();
 
             // Skip if no faces to process (we're not doing flare types yet)
-            if (mRenderOp.indexData->indexCount == 0)
+            if (!mLevel->cacheGeometry(mati->second))
                 continue;
 
             const Technique::Passes& passes = thisMaterial->getBestTechnique ()->getPasses();
             for (size_t p = 0; p < passes.size(); p++)
             {
-                Pass* pass = passes[p];
-                _setPass(pass);
-
-                // Do we need to update GPU program parameters?
-                if (pass->isProgrammable())
-                {
-                    mAutoParamDataSource->setCurrentRenderable(0);
-                    mAutoParamDataSource->setCurrentSceneManager(this);
-                    mAutoParamDataSource->setWorldMatrices(&Matrix4::IDENTITY, 1);
-                    mAutoParamDataSource->setCurrentCamera(mCameraInProgress, false);
-                    updateGpuProgramParameters(pass);
-                }
-                mDestRenderSystem->_render(mRenderOp);
+                _injectRenderWithPass(passes[p], mLevel.get());
             } 
 
 
@@ -408,9 +294,7 @@ namespace Ogre {
                 mFaceGroupSet.insert(realIndex);
                 // Try to insert, will find existing if already there
                 std::pair<MaterialFaceGroupMap::iterator, bool> matgrpi;
-                matgrpi = mMatFaceGroupMap.insert(
-                    MaterialFaceGroupMap::value_type(pMat.get(), vector<StaticFaceGroup*>::type())
-                    );
+                matgrpi = mMatFaceGroupMap.emplace(pMat.get(), std::vector<StaticFaceGroup*>());
                 // Whatever happened, matgrpi.first is map iterator
                 // Need to get second part of that to get vector
                 matgrpi.first->second.push_back(faceGroup);
@@ -439,64 +323,6 @@ namespace Ogre {
         }
 
 
-    }
-    //-----------------------------------------------------------------------
-    unsigned int BspSceneManager::cacheGeometry(unsigned int* pIndexes, 
-        const StaticFaceGroup* faceGroup)
-    {
-        // Skip sky always
-        if (faceGroup->isSky)
-            return 0;
-
-        size_t idxStart, numIdx, vertexStart;
-
-        if (faceGroup->fType == FGT_FACE_LIST)
-        {
-            idxStart = faceGroup->elementStart;
-            numIdx = faceGroup->numElements;
-            vertexStart = faceGroup->vertexStart;
-        }
-        else if (faceGroup->fType == FGT_PATCH)
-        {
-
-            idxStart = faceGroup->patchSurf->getIndexOffset();
-            numIdx = faceGroup->patchSurf->getCurrentIndexCount();
-            vertexStart = faceGroup->patchSurf->getVertexOffset();
-        }
-        else
-        {
-            // Unsupported face type
-            return 0;
-        }
-
-
-        // Copy index data
-        unsigned int* pSrc = static_cast<unsigned int*>(
-            mLevel->mIndexes->lock(
-                idxStart * sizeof(unsigned int),
-                numIdx * sizeof(unsigned int), 
-                HardwareBuffer::HBL_READ_ONLY));
-        // Offset the indexes here
-        // we have to do this now rather than up-front because the 
-        // indexes are sometimes reused to address different vertex chunks
-        for (size_t elem = 0; elem < numIdx; ++elem)
-        {
-            *pIndexes++ = *pSrc++ + static_cast<unsigned int>(vertexStart);
-        }
-        mLevel->mIndexes->unlock();
-
-        // return number of elements
-        return static_cast<unsigned int>(numIdx);
-
-
-    }
-
-    //-----------------------------------------------------------------------
-    void BspSceneManager::freeMemory(void)
-    {
-        // no need to delete index buffer, will be handled by shared pointer
-        OGRE_DELETE mRenderOp.indexData;
-        mRenderOp.indexData = 0;
     }
     //-----------------------------------------------------------------------
     void BspSceneManager::showNodeBoxes(bool show)
@@ -630,7 +456,6 @@ namespace Ogre {
     void BspSceneManager::clearScene(void)
     {
         SceneManager::clearScene();
-        freeMemory();
         // Clear level
         mLevel.reset();
     }
@@ -741,7 +566,7 @@ namespace Ogre {
 
                     for (bi = brushes.begin(); bi != biend; ++bi)
                     {
-                        list<Plane>::type::const_iterator planeit, planeitend;
+                        std::vector<Plane>::const_iterator planeit, planeitend;
                         planeitend = (*bi)->planes.end();
                         bool brushIntersect = true; // Assume intersecting for now
 
@@ -806,7 +631,7 @@ namespace Ogre {
     void BspRaySceneQuery::clearTemporaries(void)
     {
         mObjsThisQuery.clear();
-        vector<WorldFragment*>::type::iterator i;
+        std::vector<WorldFragment*>::iterator i;
         for (i = mSingleIntersections.begin(); i != mSingleIntersections.end(); ++i)
         {
             OGRE_FREE(*i, MEMCATEGORY_SCENE_CONTROL);
@@ -957,8 +782,6 @@ namespace Ogre {
     void BspSceneManagerFactory::initMetaData(void) const
     {
         mMetaData.typeName = FACTORY_TYPE_NAME;
-        mMetaData.description = "Scene manager for loading Quake3 .bsp files.";
-        mMetaData.sceneTypeMask = ST_INTERIOR;
         mMetaData.worldGeometrySupported = true;
     }
     //-----------------------------------------------------------------------

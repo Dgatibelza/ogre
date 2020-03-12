@@ -26,10 +26,7 @@ THE SOFTWARE.
 -----------------------------------------------------------------------------
 */
 #include "OgreStableHeaders.h"
-#include "OgreTextureManager.h"
 #include "OgrePixelFormat.h"
-#include "OgreRoot.h"
-#include "OgreRenderSystem.h"
 
 namespace Ogre {
     //-----------------------------------------------------------------------
@@ -58,6 +55,27 @@ namespace Ogre {
     {
         // subclasses should unregister with resource group manager
 
+    }
+    SamplerPtr TextureManager::createSampler(const String& name)
+    {
+        SamplerPtr ret = _createSamplerImpl();
+        if(!name.empty())
+        {
+            OgreAssert(mNamedSamplers.find(name) == mNamedSamplers.end(),
+                       ("Sampler '" + name + "' already exists").c_str());
+            mNamedSamplers[name] = ret;
+        }
+        return ret;
+    }
+
+    /// retrieve an named sampler
+    const SamplerPtr& TextureManager::getSampler(const String& name) const
+    {
+        static SamplerPtr nullPtr;
+        auto it = mNamedSamplers.find(name);
+        if(it == mNamedSamplers.end())
+            return nullPtr;
+        return it->second;
     }
     //-----------------------------------------------------------------------
     TexturePtr TextureManager::getByName(const String& name, const String& groupName)
@@ -158,7 +176,8 @@ namespace Ogre {
         uint fsaa, const String& fsaaHint)
     {
         TexturePtr ret;
-        ret.reset();
+
+        OgreAssert(width && height && depth, "total size of texture must not be zero");
 
         // Check for 3D texture support
         const RenderSystemCapabilities* caps =
@@ -172,6 +191,10 @@ namespace Ogre {
             usage = (usage & ~(int)TU_STATIC) | (int)TU_DYNAMIC;
         }
         ret = create(name, group, true, loader);
+
+        if(!ret)
+            return ret;
+
         ret->setTextureType(texType);
         ret->setWidth(width);
         ret->setHeight(height);
@@ -289,5 +312,52 @@ namespace Ogre {
         // Assume that same or greater number of bits means quality not degraded
         return PixelUtil::getNumElemBits(supportedFormat) >= PixelUtil::getNumElemBits(format);
         
+    }
+
+    bool TextureManager::isHardwareFilteringSupported(TextureType ttype, PixelFormat format,
+                                                      int usage, bool preciseFormatOnly)
+    {
+        if (format == PF_UNKNOWN)
+            return false;
+
+        // Check native format
+        if (preciseFormatOnly && !isFormatSupported(ttype, format, usage))
+            return false;
+
+        return true;
+    }
+
+    const TexturePtr& TextureManager::_getWarningTexture()
+    {
+        if(mWarningTexture)
+            return mWarningTexture;
+
+        // Generate warning texture
+        PixelBox pixels(8, 8, 1, PF_R5G6B5);
+        DataStreamPtr data(new MemoryDataStream(pixels.getConsecutiveSize()));
+        pixels.data = static_pointer_cast<MemoryDataStream>(data)->getPtr();
+
+        // Yellow/black stripes
+        const ColourValue black(0, 0, 0), yellow(1, 1, 0);
+        for (size_t y = 0; y < pixels.getHeight(); ++y)
+        {
+            for (size_t x = 0; x < pixels.getWidth(); ++x)
+            {
+                pixels.setColourAt((((x + y) % 8) < 4) ? black : yellow, x, y, 0);
+            }
+        }
+
+        mWarningTexture = loadRawData("Warning", ResourceGroupManager::INTERNAL_RESOURCE_GROUP_NAME,
+                                      data, pixels.getWidth(), pixels.getHeight(), pixels.format);
+
+        return mWarningTexture;
+    }
+
+    const SamplerPtr& TextureManager::getDefaultSampler()
+    {
+        if(!mDefaultSampler)
+            mDefaultSampler = createSampler();
+
+        return mDefaultSampler;
     }
 }

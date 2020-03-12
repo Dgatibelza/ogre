@@ -27,14 +27,6 @@ THE SOFTWARE.
 */
 #include "OgreStableHeaders.h"
 #include "OgreResourceBackgroundQueue.h"
-#include "OgreException.h"
-#include "OgreResourceManager.h"
-#include "OgreRoot.h"
-
-#if OGRE_THREAD_SUPPORT == 3 // resource system is not threadsafe
-#undef OGRE_THREAD_SUPPORT
-#define OGRE_THREAD_SUPPORT 0
-#endif
 
 namespace Ogre {
 

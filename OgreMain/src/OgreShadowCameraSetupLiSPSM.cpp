@@ -29,21 +29,18 @@ THE SOFTWARE.
 
 #include "OgreStableHeaders.h"
 #include "OgreShadowCameraSetupLiSPSM.h"
-#include "OgreSceneManager.h"
-#include "OgreCamera.h"
 #include "OgreLight.h"
-#include "OgrePlane.h"
 
 namespace Ogre
 {
 
 
-    LiSPSMShadowCameraSetup::LiSPSMShadowCameraSetup(void)
-        : mOptAdjustFactor(0.1f)
-        , mUseSimpleNOpt(true)
+    LiSPSMShadowCameraSetup::LiSPSMShadowCameraSetup(Real n, bool useSimpleNOpt, Degree angle)
+        : mOptAdjustFactor(n)
+        , mUseSimpleNOpt(useSimpleNOpt)
         , mOptAdjustFactorTweak(1.0)
-        , mCosCamLightDirThreshold(0.9)
     {
+        setCameraLightDirectionThreshold(angle);
     }
     //-----------------------------------------------------------------------
     LiSPSMShadowCameraSetup::~LiSPSMShadowCameraSetup(void)
@@ -94,7 +91,7 @@ namespace Ogre
 
         // set up the LiSPSM perspective transformation
         // build up frustum to map P onto the unit cube with (-1/-1/-1) and (+1/+1/+1)
-        Matrix4 P = buildFrustumProjection(-1, 1, -1, 1, n_opt + d, n_opt);
+        Matrix4 P = Math::makePerspectiveMatrix(-1, 1, -1, 1, n_opt + d, n_opt);
 
         return P * lightSpaceTranslation;
     }
@@ -107,7 +104,7 @@ namespace Ogre
         Matrix4 invLightSpace = lightSpace.inverse();
 
         // get view matrix
-        const Matrix4& viewMatrix = cam.getViewMatrix();
+        const Affine3& viewMatrix = cam.getViewMatrix();
 
         // calculate z0_ls
         const Vector3 e_ws  = getNearCameraPoint_ws(viewMatrix, bodyLVS);
@@ -141,7 +138,7 @@ namespace Ogre
         const Camera& cam) const
     {
         // get view matrix
-        const Matrix4& viewMatrix = cam.getViewMatrix();
+        const Affine3& viewMatrix = cam.getViewMatrix();
 
         // calculate e_es
         const Vector3 e_ws  = getNearCameraPoint_ws(viewMatrix, bodyLVS);
@@ -200,26 +197,6 @@ namespace Ogre
         }
     }
     //-----------------------------------------------------------------------
-    Matrix4 LiSPSMShadowCameraSetup::buildFrustumProjection(Real left, Real right, 
-        Real bottom, Real top, Real nearf, Real farf) const
-    {
-        // Changed to nearf because windows defines near and far as a macros
-        Real m00 = 2 * nearf / (right - left),
-            m02 = (right + left) / (right - left),
-            m11 = 2 * nearf / (top - bottom),
-            m12 = (top + bottom) / (top - bottom),
-            m22 = -(farf + nearf) / (farf - nearf),
-            m23 = -2 * farf * nearf / (farf - nearf),
-            m32 = -1;
-
-        Matrix4 m(m00, 0.0, m02, 0.0,
-            0.0, m11, m12, 0.0,
-            0.0, 0.0, m22, m23,
-            0.0, 0.0, m32, 0.0);
-
-        return m;
-    }
-    //-----------------------------------------------------------------------
     void LiSPSMShadowCameraSetup::getShadowCamera (const SceneManager *sm, const Camera *cam, 
         const Viewport *vp, const Light *light, Camera *texCam, size_t iteration) const
     {
@@ -232,7 +209,7 @@ namespace Ogre
 
 
         // calculate standard shadow mapping matrix
-        Matrix4 LView, LProj;
+        Affine3 LView; Matrix4 LProj;
         calculateShadowMappingMatrix(*sm, *cam, *light, &LView, &LProj, NULL);
         
         // if the direction of the light and the direction of the camera tend to be parallel,

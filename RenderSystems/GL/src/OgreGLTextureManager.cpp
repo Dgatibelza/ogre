@@ -31,11 +31,13 @@ THE SOFTWARE.
 #include "OgreRenderSystem.h"
 #include "OgreGLCopyingRenderTexture.h"
 #include "OgreGLTexture.h"
+#include "OgreGLPixelFormat.h"
+#include "OgreGLRenderSystem.h"
 
 namespace Ogre {
     //-----------------------------------------------------------------------------
     GLTextureManager::GLTextureManager(GLRenderSystem* renderSystem)
-        : TextureManager(), mRenderSystem(renderSystem), mWarningTextureID(0)
+        : TextureManager(), mRenderSystem(renderSystem)
     {
         // register with group manager
         ResourceGroupManager::getSingleton()._registerResourceManager(mResourceType, this);
@@ -45,8 +47,6 @@ namespace Ogre {
     {
         // unregister with group manager
         ResourceGroupManager::getSingleton()._unregisterResourceManager(mResourceType);
-        // Delete warning texture
-        glDeleteTextures(1, &mWarningTextureID);
     }
     //-----------------------------------------------------------------------------
     Resource* GLTextureManager::createImpl(const String& name, ResourceHandle handle, 
@@ -56,36 +56,6 @@ namespace Ogre {
         return new GLTexture(this, name, handle, group, isManual, loader, mRenderSystem);
     }
 
-    //-----------------------------------------------------------------------------
-    void GLTextureManager::createWarningTexture()
-    {
-        // Generate warning texture
-        uint32 width = 8;
-        uint32 height = 8;
-        uint32 *data = new uint32[width*height];        // 0xXXRRGGBB
-        // Yellow/black stripes
-        for(size_t y=0; y<height; ++y)
-        {
-            for(size_t x=0; x<width; ++x)
-            {
-                data[y*width+x] = (((x+y)%8)<4)?0x000000:0xFFFF00;
-            }
-        }
-        // Create GL resource
-        glGenTextures(1, &mWarningTextureID);
-        glBindTexture(GL_TEXTURE_2D, mWarningTextureID);
-        if (GLEW_VERSION_1_2)
-        {
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, width, height, 0, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, (void*)data);
-        }
-        else
-        {
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, width, height, 0, GL_BGRA, GL_UNSIGNED_INT, (void*)data);
-        }
-        // Free memory
-        delete [] data;
-    }
     //-----------------------------------------------------------------------------
     PixelFormat GLTextureManager::getNativeFormat(TextureType ttype, PixelFormat format, int usage)
     {
@@ -97,15 +67,20 @@ namespace Ogre {
         if(PixelUtil::isCompressed(format) &&
             !caps->hasCapability( RSC_TEXTURE_COMPRESSION_DXT ))
         {
-            return PF_A8R8G8B8;
+            return PF_BYTE_RGBA;
         }
         // if floating point textures not supported, revert to PF_A8R8G8B8
         if(PixelUtil::isFloatingPoint(format) &&
             !caps->hasCapability( RSC_TEXTURE_FLOAT ))
         {
-            return PF_A8R8G8B8;
+            return PF_BYTE_RGBA;
         }
         
+        if(GLPixelUtil::getGLInternalFormat(format) == GL_NONE)
+        {
+            return PF_BYTE_RGBA;
+        }
+
         // Check if this is a valid rendertarget format
         if( usage & TU_RENDERTARGET )
         {
@@ -123,81 +98,18 @@ namespace Ogre {
     bool GLTextureManager::isHardwareFilteringSupported(TextureType ttype, PixelFormat format, int usage,
             bool preciseFormatOnly)
     {
-        if (format == PF_UNKNOWN)
-            return false;
-
-        // Check native format
-        PixelFormat nativeFormat = getNativeFormat(ttype, format, usage);
-        if (preciseFormatOnly && format != nativeFormat)
+        // precise format check
+        if (!TextureManager::isHardwareFilteringSupported(ttype, format, usage, preciseFormatOnly))
             return false;
 
         // Assume non-floating point is supported always
-        if (!PixelUtil::isFloatingPoint(nativeFormat))
+        if (!PixelUtil::isFloatingPoint(getNativeFormat(ttype, format, usage)))
             return true;
 
-        // Hack: there are no elegant GL API to detects texture filtering supported,
-        // just hard code for cards based on vendor specifications.
-
-        // TODO: Add cards that 16 bits floating point flitering supported by
-        // hardware below
-        static const String sFloat16SupportedCards[] =
-        {
-            // GeForce 8 Series
-            "*GeForce*8800*",
-
-            // GeForce 7 Series
-            "*GeForce*7950*",
-            "*GeForce*7900*",
-            "*GeForce*7800*",
-            "*GeForce*7600*",
-            "*GeForce*7500*",
-            "*GeForce*7300*",
-
-            // GeForce 6 Series
-            "*GeForce*6800*",
-            "*GeForce*6700*",
-            "*GeForce*6600*",
-            "*GeForce*6500*",
-
-            ""                      // Empty string means end of list
-        };
-
-        // TODO: Add cards that 32 bits floating point flitering supported by
-        // hardware below
-        static const String sFloat32SupportedCards[] =
-        {
-            // GeForce 8 Series
-            "*GeForce*8800*",
-
-            ""                      // Empty string means end of list
-        };
-
-        PixelComponentType pct = PixelUtil::getComponentType(nativeFormat);
-        const String* supportedCards;
-        switch (pct)
-        {
-        case PCT_FLOAT16:
-            supportedCards = sFloat16SupportedCards;
-            break;
-        case PCT_FLOAT32:
-            supportedCards = sFloat32SupportedCards;
-            break;
-        default:
-            return false;
-        }
-
-        const GLubyte* pcRenderer = glGetString(GL_RENDERER);
-        String str = (const char*)pcRenderer;
-
-        for (; !supportedCards->empty(); ++supportedCards)
-        {
-            if (StringUtil::match(str, *supportedCards))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        // check for floating point extension
+        // note false positives on old harware: 
+        // https://www.khronos.org/opengl/wiki/Floating_point_and_mipmapping_and_filtering
+        return mRenderSystem->checkExtension("GL_ARB_texture_float");
     }
 
 }

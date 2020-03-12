@@ -27,10 +27,6 @@ THE SOFTWARE.
 */
 #include "OgreStableHeaders.h"
 
-#include "OgreArchiveManager.h"
-#include "OgreLogManager.h"
-#include "OgreException.h"
-
 namespace Ogre {
     typedef void (*createFunc)( Archive**, const String& );
 
@@ -129,8 +125,8 @@ namespace Ogre {
     }
     //-----------------------------------------------------------------------
     void ArchiveManager::addArchiveFactory(ArchiveFactory* factory)
-    {        
-        mArchFactories.insert( ArchiveFactoryMap::value_type( factory->getType(), factory ) );
+    {
+        mArchFactories.emplace(factory->getType(), factory);
         LogManager::getSingleton().logMessage("ArchiveFactory for archive type " +     factory->getType() + " registered.");
     }
 

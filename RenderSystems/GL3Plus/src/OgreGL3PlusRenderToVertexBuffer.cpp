@@ -33,9 +33,8 @@ Copyright (c) 2000-2014 Torus Knot Software Ltd
 #include "OgreSceneManager.h"
 #include "OgreRoot.h"
 #include "OgreRenderSystem.h"
-#include "OgreGLSLMonolithicProgramManager.h"
+#include "OgreGLSLProgramManager.h"
 #include "OgreGLSLShader.h"
-#include "OgreGLSLSeparableProgramManager.h"
 #include "OgreStringConverter.h"
 #include "OgreTechnique.h"
 
@@ -102,7 +101,7 @@ namespace Ogre {
     {
         op.operationType = mOperationType;
         op.useIndexes = false;
-        op.vertexData = mVertexData;
+        op.vertexData = mVertexData.get();
     }
 
 
@@ -141,16 +140,7 @@ namespace Ogre {
             nameStrings.push_back(name);
         }
 
-        GLSLProgram* program;
-        if (Root::getSingleton().getRenderSystem()->getCapabilities()->hasCapability(
-                RSC_SEPARATE_SHADER_OBJECTS))
-        {
-            program = GLSLSeparableProgramManager::getSingleton().getCurrentSeparableProgram();
-        }
-        else
-        {
-            program = GLSLMonolithicProgramManager::getSingleton().getActiveMonolithicProgram();
-        }
+        GLSLProgram* program = GLSLProgramManager::getSingleton().getActiveProgram();
 
         program->setTransformFeedbackVaryings(nameStrings);
     }
@@ -202,9 +192,6 @@ namespace Ogre {
 
         // Bind shader parameters.
         RenderSystem* targetRenderSystem = Root::getSingleton().getRenderSystem();
-        targetRenderSystem->_setWorldMatrix(Matrix4::IDENTITY);
-        targetRenderSystem->_setViewMatrix(Matrix4::IDENTITY);
-        targetRenderSystem->_setProjectionMatrix(Matrix4::IDENTITY);
         if (r2vbPass->hasVertexProgram())
         {
             targetRenderSystem->bindGpuProgramParameters(GPT_VERTEX_PROGRAM,
@@ -227,12 +214,8 @@ namespace Ogre {
         // OGRE_CHECK_GL_ERROR(glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 0, VertexBuffer[mTargetBufferIndex]));
         OGRE_CHECK_GL_ERROR(glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 0, targetVertexBuffer->getGLBufferId()));
         // OGRE_CHECK_GL_ERROR(glBindVertexArray(VertexArray[mSourceBufferIndex]));
-        if (Root::getSingleton().getRenderSystem()->getCapabilities()->hasCapability(RSC_SEPARATE_SHADER_OBJECTS))
-        {
-            GLSLSeparableProgram* separableProgram =
-                GLSLSeparableProgramManager::getSingleton().getCurrentSeparableProgram();
-            separableProgram->activate();
-        }
+
+        GLSLProgramManager::getSingleton().getActiveProgram()->activate();
 
         // 'Render' data to the transform buffer.
         OGRE_CHECK_GL_ERROR(glBeginQuery(GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN, mPrimitivesDrawnQuery));

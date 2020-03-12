@@ -32,7 +32,7 @@ THE SOFTWARE.
 #include "OgreGLES2RenderSystem.h"
 #include "OgreGLUtil.h"
 #include "OgreGLES2StateCacheManager.h"
-#include "OgreGLES2Support.h"
+#include "OgreGLNativeSupport.h"
 
 namespace Ogre {
     GLES2HardwareVertexBuffer::GLES2HardwareVertexBuffer(HardwareBufferManagerBase* mgr, 
@@ -40,12 +40,12 @@ namespace Ogre {
                                                        size_t numVertices,
                                                        HardwareBuffer::Usage usage,
                                                        bool useShadowBuffer)
-        : HardwareVertexBuffer(mgr, vertexSize, numVertices, usage, false, useShadowBuffer),
+        : HardwareVertexBuffer(mgr, vertexSize, numVertices, usage, false, useShadowBuffer || HANDLE_CONTEXT_LOSS),
           mBuffer(GL_ARRAY_BUFFER, mSizeInBytes, usage)
     {
     }
     
-#if OGRE_PLATFORM == OGRE_PLATFORM_ANDROID || OGRE_PLATFORM == OGRE_PLATFORM_EMSCRIPTEN
+#if HANDLE_CONTEXT_LOSS
     void GLES2HardwareVertexBuffer::notifyOnContextLost()
     {
         mBuffer.destroyBuffer();
@@ -63,9 +63,7 @@ namespace Ogre {
     {
         if (mUseShadowBuffer)
         {
-            void* srcData = mShadowBuffer->lock(offset, length, HBL_READ_ONLY);
-            memcpy(pDest, srcData, length);
-            mShadowBuffer->unlock();
+            mShadowBuffer->readData(offset, length, pDest);
         }
         else
         {
@@ -81,21 +79,17 @@ namespace Ogre {
         // Update the shadow buffer
         if(mUseShadowBuffer)
         {
-            void* destData = mShadowBuffer->lock(offset, length,
-                                                  discardWholeBuffer ? HBL_DISCARD : HBL_NORMAL);
-            memcpy(destData, pSource, length);
-            mShadowBuffer->unlock();
+            mShadowBuffer->writeData(offset, length, pSource, discardWholeBuffer);
         }
 
         mBuffer.writeData(offset, length, pSource, discardWholeBuffer);
     }
 
-#if OGRE_NO_GLES3_SUPPORT == 0
     void GLES2HardwareVertexBuffer::copyData(HardwareBuffer& srcBuffer, size_t srcOffset,
                                                size_t dstOffset, size_t length, bool discardWholeBuffer)
     {
         // If the buffer is not in system memory we can use ARB_copy_buffers to do an optimised copy.
-        if (srcBuffer.isSystemMemory())
+        if (OGRE_NO_GLES3_SUPPORT || srcBuffer.isSystemMemory())
         {
             HardwareBuffer::copyData(srcBuffer, srcOffset, dstOffset, length, discardWholeBuffer);
         }
@@ -109,18 +103,14 @@ namespace Ogre {
                              srcOffset, dstOffset, length, discardWholeBuffer);
         }
     }
-#endif
+
     void GLES2HardwareVertexBuffer::_updateFromShadow(void)
     {
         if (mUseShadowBuffer && mShadowUpdated && !mSuppressHardwareUpdate)
         {
-            const void *srcData = mShadowBuffer->lock(mLockStart,
-                                                       mLockSize,
-                                                       HBL_READ_ONLY);
+            HardwareBufferLockGuard shadowLock(mShadowBuffer.get(), mLockStart, mLockSize, HBL_READ_ONLY);
+            mBuffer.writeData(mLockStart, mLockSize, shadowLock.pData, false);
 
-            mBuffer.writeData(mLockStart, mLockSize, srcData, false);
-
-            mShadowBuffer->unlock();
             mShadowUpdated = false;
         }
     }

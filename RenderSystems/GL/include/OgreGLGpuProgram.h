@@ -35,39 +35,29 @@ THE SOFTWARE.
 
 namespace Ogre {
 
+    struct GLGpuProgramBase
+    {
+        virtual ~GLGpuProgramBase() {}
+        /// Execute the binding functions for this program
+        virtual void bindProgram(void) = 0;
+        /// Execute the binding functions for this program
+        virtual void unbindProgram(void) = 0;
+        /// Execute the param binding functions for this program
+        virtual void bindProgramParameters(GpuProgramParametersSharedPtr params, uint16 mask) = 0;
+        /// Test whether attribute index for a given semantic is valid
+        virtual bool isAttributeValid(VertexElementSemantic semantic, uint index);
+    };
+
     /** Generalised low-level GL program, can be applied to multiple types (eg ARB and NV) */
-    class _OgreGLExport GLGpuProgram : public GpuProgram
+    class _OgreGLExport GLGpuProgram : public GpuProgram, public GLGpuProgramBase
     {
     public:
         GLGpuProgram(ResourceManager* creator, const String& name, ResourceHandle handle,
             const String& group, bool isManual = false, ManualResourceLoader* loader = 0);
         virtual ~GLGpuProgram();
-
-        /// Execute the binding functions for this program
-        virtual void bindProgram(void) {}
-        /// Execute the binding functions for this program
-        virtual void unbindProgram(void) {}
-
-        /// Execute the param binding functions for this program
-        virtual void bindProgramParameters(GpuProgramParametersSharedPtr params, uint16 mask) {}
-        /// Bind just the pass iteration parameters
-        virtual void bindProgramPassIterationParameters(GpuProgramParametersSharedPtr params) {}
-
-        /// @copydoc Resource::calculateSize
-        virtual size_t calculateSize(void) const;
-
-        /** Test whether attribute index for a given semantic is valid. 
-        */
-        virtual bool isAttributeValid(VertexElementSemantic semantic, uint index);
-
     protected:
-        /** Overridden from GpuProgram, do nothing */
-        void loadFromSource(void) {}
-        /// @copydoc Resource::unloadImpl
-        void unloadImpl(void) {}
 
         GLuint mProgramID;
-        GLenum mProgramType;
     };
 
     /** Specialisation of the GL low-level program for ARB programs. */
@@ -78,22 +68,15 @@ namespace Ogre {
             const String& group, bool isManual = false, ManualResourceLoader* loader = 0);
         virtual ~GLArbGpuProgram();
 
-        /// @copydoc GpuProgram::setType
-        void setType(GpuProgramType t);
-
-
         /// Execute the binding functions for this program
         void bindProgram(void);
         /// Execute the unbinding functions for this program
         void unbindProgram(void);
         /// Execute the param binding functions for this program
         void bindProgramParameters(GpuProgramParametersSharedPtr params, uint16 mask);
-        /// Bind just the pass iteration parameters
-        void bindProgramPassIterationParameters(GpuProgramParametersSharedPtr params);
 
         /// Get the GL type for the program
-        GLuint getProgramType(void) const
-        { return mProgramType; }
+        GLenum getProgramType(void) const;
 
     protected:
         void loadFromSource(void);

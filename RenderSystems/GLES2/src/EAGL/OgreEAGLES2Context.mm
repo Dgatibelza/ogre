@@ -67,8 +67,7 @@ namespace Ogre {
         if (!mContext || ![EAGLContext setCurrentContext:mContext])
         {
             OGRE_EXCEPT(Exception::ERR_RENDERINGAPI_ERROR,
-                        "Unable to create a suitable EAGLContext",
-                        __FUNCTION__);
+                        "Unable to create a suitable EAGLContext");
         }
 
 #ifdef __IPHONE_7_1
@@ -97,17 +96,11 @@ namespace Ogre {
         SAFE_ARC_RELEASE(mDrawable);
     }
 
-    void EAGLES2Context::bindSampleFramebuffer()
-    {
-        if(mIsMultiSampleSupported && mNumSamples > 0)
-        {
-            // Bind the FSAA buffer if we're doing multisampling
-            OGRE_CHECK_GL_ERROR(glBindFramebuffer(GL_FRAMEBUFFER, mSampleFramebuffer));
-        }
-    }
-
     bool EAGLES2Context::createFramebuffer()
     {
+        GLES2RenderSystem *rs = static_cast<GLES2RenderSystem*>(Root::getSingleton().getRenderSystem());
+        bool packedDepthStencil = rs->hasMinGLVersion(3, 0) || rs->checkExtension("GL_OES_packed_depth_stencil");
+
         destroyFramebuffer();
 
         OGRE_CHECK_GL_ERROR(glGenFramebuffers(1, &mViewFramebuffer));
@@ -121,8 +114,7 @@ namespace Ogre {
         {
             glGetError();
             OGRE_EXCEPT(Exception::ERR_RENDERINGAPI_ERROR,
-                        "Failed to bind the drawable to a renderbuffer object",
-                        __FUNCTION__);
+                        "Failed to bind the drawable to a renderbuffer object");
             return false;
         }
 
@@ -155,16 +147,17 @@ namespace Ogre {
             OGRE_CHECK_GL_ERROR(glGenRenderbuffers(1, &mDepthRenderbuffer));
             OGRE_CHECK_GL_ERROR(glBindRenderbuffer(GL_RENDERBUFFER, mDepthRenderbuffer));
             OGRE_CHECK_GL_ERROR(glLabelObjectEXT(GL_RENDERBUFFER, mDepthRenderbuffer, 0, "Depth Renderbuffer"));
-            OGRE_CHECK_GL_ERROR(glRenderbufferStorageMultisampleAPPLE(GL_RENDERBUFFER, samplesToUse, GL_DEPTH_COMPONENT16, mBackingWidth, mBackingHeight));
+            OGRE_CHECK_GL_ERROR(glRenderbufferStorageMultisampleAPPLE(GL_RENDERBUFFER, samplesToUse, packedDepthStencil ? GL_DEPTH24_STENCIL8_OES : GL_DEPTH_COMPONENT16, mBackingWidth, mBackingHeight));
             OGRE_CHECK_GL_ERROR(glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, mDepthRenderbuffer));
+            if(packedDepthStencil)
+                OGRE_CHECK_GL_ERROR(glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT, GL_RENDERBUFFER, mDepthRenderbuffer));
 
             // Validate the FSAA framebuffer
             if(glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
             {
                 glGetError();
                 OGRE_EXCEPT(Exception::ERR_RENDERINGAPI_ERROR,
-                            "Failed to make a complete FSAA framebuffer object",
-                            __FUNCTION__);
+                            "Failed to make a complete FSAA framebuffer object");
                 return false;
             }
         }
@@ -174,8 +167,10 @@ namespace Ogre {
             OGRE_CHECK_GL_ERROR(glGenRenderbuffers(1, &mDepthRenderbuffer));
             OGRE_CHECK_GL_ERROR(glBindRenderbuffer(GL_RENDERBUFFER, mDepthRenderbuffer));
             OGRE_CHECK_GL_ERROR(glLabelObjectEXT(GL_RENDERBUFFER, mDepthRenderbuffer, 0, "Depth Renderbuffer"));
-            OGRE_CHECK_GL_ERROR(glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, mBackingWidth, mBackingHeight));
+            OGRE_CHECK_GL_ERROR(glRenderbufferStorage(GL_RENDERBUFFER, packedDepthStencil ? GL_DEPTH24_STENCIL8_OES : GL_DEPTH_COMPONENT16, mBackingWidth, mBackingHeight));
             OGRE_CHECK_GL_ERROR(glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, mDepthRenderbuffer));
+            if(packedDepthStencil)
+                OGRE_CHECK_GL_ERROR(glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT, GL_RENDERBUFFER, mDepthRenderbuffer));
         }
 
         OGRE_CHECK_GL_ERROR(glBindRenderbuffer(GL_RENDERBUFFER, mViewRenderbuffer));
@@ -184,8 +179,7 @@ namespace Ogre {
         {
             glGetError();
             OGRE_EXCEPT(Exception::ERR_RENDERINGAPI_ERROR,
-                        "Failed to make a complete framebuffer object",
-                        __FUNCTION__);
+                        "Failed to make a complete framebuffer object");
             return false;
         }
 
@@ -231,8 +225,7 @@ namespace Ogre {
         if (!ret)
         {
             OGRE_EXCEPT(Exception::ERR_RENDERINGAPI_ERROR,
-                        "Failed to make context current",
-                        __FUNCTION__);
+                        "Failed to make context current");
         }
     }
 

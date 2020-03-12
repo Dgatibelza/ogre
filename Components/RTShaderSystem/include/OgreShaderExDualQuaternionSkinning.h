@@ -43,12 +43,14 @@ namespace RTShader {
 */
 
 #define SGX_LIB_DUAL_QUATERNION                 "SGXLib_DualQuaternion"
+/// @deprecated obsolete
 #define SGX_FUNC_BLEND_WEIGHT                   "SGX_BlendWeight"
 #define SGX_FUNC_ANTIPODALITY_ADJUSTMENT        "SGX_AntipodalityAdjustment"
 #define SGX_FUNC_CALCULATE_BLEND_POSITION       "SGX_CalculateBlendPosition"
 #define SGX_FUNC_CALCULATE_BLEND_NORMAL         "SGX_CalculateBlendNormal"
 #define SGX_FUNC_NORMALIZE_DUAL_QUATERNION      "SGX_NormalizeDualQuaternion"
 #define SGX_FUNC_ADJOINT_TRANSPOSE_MATRIX       "SGX_AdjointTransposeMatrix"
+/// @deprecated obsolete
 #define SGX_FUNC_BUILD_DUAL_QUATERNION_MATRIX   "SGX_BuildDualQuaternionMatrix"
 
 /** Implement a sub render state which performs dual quaternion hardware skinning.
@@ -80,24 +82,22 @@ public:
 // Protected methods
 protected:
     /** Adds functions to calculate position data in world, object and projective space */
-    void addPositionCalculations(Function* vsMain, int& funcCounter);
+    void addPositionCalculations(Function* vsMain);
 
     /** Adjusts the sign of a dual quaternion depending on its orientation to the root dual quaternion */
-    void adjustForCorrectAntipodality(Function* vsMain, int index, int& funcCounter, const ParameterPtr& pTempWorldMatrix);
+    void adjustForCorrectAntipodality(Function* vsMain, int index, const ParameterPtr& pTempWorldMatrix);
 
     /** Adds the weight of a given position for a given index
     @param pPositionTempParameter
         Requires a temp parameter with a matrix the same size of pPositionRelatedParam
     */
     void addIndexedPositionWeight(Function* vsMain, int index, ParameterPtr& pWorldMatrix,
-                                  ParameterPtr& pPositionTempParameter, ParameterPtr& pPositionRelatedOutputParam, int& funcCounter);
+                                  ParameterPtr& pPositionTempParameter, ParameterPtr& pPositionRelatedOutputParam);
     
     /** Adds the calculations for calculating a normal related element */
     void addNormalRelatedCalculations(Function* vsMain,
-                                      ParameterPtr& pNormalIn,
                                       ParameterPtr& pNormalRelatedParam,
-                                      ParameterPtr& pNormalWorldRelatedParam,
-                                      int& funcCounter);
+                                      ParameterPtr& pNormalWorldRelatedParam);
 
 protected:
     UniformParameterPtr mParamInScaleShearMatrices;

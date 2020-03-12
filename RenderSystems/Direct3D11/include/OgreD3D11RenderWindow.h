@@ -32,6 +32,7 @@ THE SOFTWARE.
 #include "OgreD3D11Prerequisites.h"
 #include "OgreD3D11DeviceResource.h"
 #include "OgreD3D11Mappings.h"
+#include "OgreD3D11RenderTarget.h"
 #include "OgreRenderWindow.h"
 
 #if OGRE_PLATFORM == OGRE_PLATFORM_WINRT 
@@ -47,7 +48,7 @@ THE SOFTWARE.
 namespace Ogre 
 {
     class _OgreD3D11Export D3D11RenderWindowBase
-        : public RenderWindow
+        : public RenderWindow, public D3D11RenderTarget
         , protected D3D11DeviceResource
     {
     public:
@@ -63,6 +64,10 @@ namespace Ogre
 
         bool isClosed() const                                   { return mClosed; }
         bool isHidden() const                                   { return mHidden; }
+
+        virtual uint getNumberOfViews() const;
+        virtual ID3D11Texture2D* getSurface(uint index = 0) const;
+        virtual ID3D11RenderTargetView* getRenderTargetView(uint index = 0) const;
 
         void getCustomAttribute( const String& name, void* pData );
         /** Overridden - see RenderTarget. */
@@ -117,13 +122,13 @@ namespace Ogre
         /// Get the swapchain details.
         IDXGISwapChainN* _getSwapChain()                        { return mpSwapChain.Get(); }
         DXGI_SWAP_CHAIN_DESC_N* _getSwapChainDescription(void)  { return &mSwapChainDesc; }
-        virtual bool _shouldRebindBackBuffer()                  { return mUseFlipSequentialMode; }
+        virtual bool _shouldRebindBackBuffer()                  { return mUseFlipMode; }
 
         /// @copydoc RenderTarget::setFSAA
         virtual void setFSAA(uint fsaa, const String& fsaaHint) { mFSAA = fsaa; mFSAAHint = fsaaHint; _changeBuffersFSAA(); }
 
         void setVSyncEnabled(bool vsync)                        { mVSync = vsync; }
-        bool isVSyncEnabled() const                             { return mVSync || mUseFlipSequentialMode; }
+        bool isVSyncEnabled() const                             { return mVSync || mUseFlipMode; }
         void setVSyncInterval(unsigned interval)                { mVSyncInterval = interval; }
         unsigned getVSyncInterval() const                       { return mVSyncInterval; }
 
@@ -134,7 +139,7 @@ namespace Ogre
         void notifyDeviceLost(D3D11Device* device);
         void notifyDeviceRestored(D3D11Device* device);
 
-        DXGI_FORMAT _getSwapChainFormat()                       { return D3D11Mappings::_getGammaFormat(_getBasicFormat(), isHardwareGammaEnabled() && !mUseFlipSequentialMode); }
+        DXGI_FORMAT _getSwapChainFormat()                       { return D3D11Mappings::_getGammaFormat(_getBasicFormat(), isHardwareGammaEnabled() && !mUseFlipMode); }
         void _createSwapChain();
         virtual HRESULT _createSwapChainImpl(IDXGIDeviceN* pDXGIDevice) = 0;
         void _destroySwapChain();
@@ -149,9 +154,9 @@ namespace Ogre
         ComPtr<IDXGISwapChainN> mpSwapChain;
         DXGI_SWAP_CHAIN_DESC_N  mSwapChainDesc;
 
-        bool                    mUseFlipSequentialMode;         // Flag to determine if the swapchain flip sequential model is enabled. Not supported before Win8.0, required for WinRT.
-        bool                    mVSync;                         // mVSync assumed to be true if mUseFlipSequentialMode
-        unsigned                mVSyncInterval;                 // Used at least 1 if mUseFlipSequentialMode
+        bool                    mUseFlipMode;                   // Flag to determine if the swapchain flip model is enabled. Not supported before Win8.0, required for WinRT.
+        bool                    mVSync;                         // mVSync assumed to be true if mUseFlipMode
+        unsigned                mVSyncInterval;                 // Used at least 1 if mUseFlipMode
 
         DXGI_FRAME_STATISTICS   mPreviousPresentStats;          // We save the previous present stats - so we can detect a "vblank miss"
         bool                    mPreviousPresentStatsIsValid;   // Does mLastPresentStats data is valid (it isn't if when you start or resize the window)
@@ -195,8 +200,6 @@ namespace Ogre
         /// Indicate that fullscreen / windowed switching has finished
         void _finishSwitchingFullscreen();
         void setActive(bool state);
-
-        static bool IsWindows8OrGreater();
 
     protected:
         HWND                    mHWnd;                          // Win32 window handle

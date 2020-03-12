@@ -9,7 +9,7 @@
 	material 			CDATA 			#REQUIRED
 	usesharedvertices	(true|false)	"true"
 	use32bitindexes		(true|false)	"false"
-	operationtype       (triangle_list|triangle_strip|triangle_fan)	"triangle_list">
+	operationtype       (line_list|line_strip|point_list|triangle_list|triangle_strip|triangle_fan|line_list_adj|line_strip_adj|triangle_list_adj|triangle_strip_adj)	"triangle_list">
 <!ELEMENT textures (texture+)>
 <!ELEMENT texture EMPTY>
 <!ATTLIST texture
@@ -63,18 +63,18 @@
 	colours_diffuse 			(true|false)	"false"
 	colours_specular 			(true|false)	"false"
 	texture_coords				(0|1|2|3|4|5|6|7|8) 	"0"
-	texture_coord_dimensions_0 = (1|2|3|4|float1|float2|float3|float4|short1|short2|short3|short4|ubyte4|colour|colour_argb|colour_abgr) "2"
-	texture_coord_dimensions_1 = (1|2|3|4|float1|float2|float3|float4|short1|short2|short3|short4|ubyte4|colour|colour_argb|colour_abgr) "2"
-	texture_coord_dimensions_2 = (1|2|3|4|float1|float2|float3|float4|short1|short2|short3|short4|ubyte4|colour|colour_argb|colour_abgr) "2"
-	texture_coord_dimensions_3 = (1|2|3|4|float1|float2|float3|float4|short1|short2|short3|short4|ubyte4|colour|colour_argb|colour_abgr) "2"
-	texture_coord_dimensions_4 = (1|2|3|4|float1|float2|float3|float4|short1|short2|short3|short4|ubyte4|colour|colour_argb|colour_abgr) "2"
-	texture_coord_dimensions_5 = (1|2|3|4|float1|float2|float3|float4|short1|short2|short3|short4|ubyte4|colour|colour_argb|colour_abgr) "2"
-	texture_coord_dimensions_6 = (1|2|3|4|float1|float2|float3|float4|short1|short2|short3|short4|ubyte4|colour|colour_argb|colour_abgr) "2"
-	texture_coord_dimensions_7 = (1|2|3|4|float1|float2|float3|float4|short1|short2|short3|short4|ubyte4|colour|colour_argb|colour_abgr) "2"
+	texture_coord_dimensions_0  (1|2|3|4|float1|float2|float3|float4|short1|short2|short3|short4|ubyte4|colour|colour_argb|colour_abgr) "2"
+	texture_coord_dimensions_1  (1|2|3|4|float1|float2|float3|float4|short1|short2|short3|short4|ubyte4|colour|colour_argb|colour_abgr) "2"
+	texture_coord_dimensions_2  (1|2|3|4|float1|float2|float3|float4|short1|short2|short3|short4|ubyte4|colour|colour_argb|colour_abgr) "2"
+	texture_coord_dimensions_3  (1|2|3|4|float1|float2|float3|float4|short1|short2|short3|short4|ubyte4|colour|colour_argb|colour_abgr) "2"
+	texture_coord_dimensions_4  (1|2|3|4|float1|float2|float3|float4|short1|short2|short3|short4|ubyte4|colour|colour_argb|colour_abgr) "2"
+	texture_coord_dimensions_5  (1|2|3|4|float1|float2|float3|float4|short1|short2|short3|short4|ubyte4|colour|colour_argb|colour_abgr) "2"
+	texture_coord_dimensions_6  (1|2|3|4|float1|float2|float3|float4|short1|short2|short3|short4|ubyte4|colour|colour_argb|colour_abgr) "2"
+	texture_coord_dimensions_7  (1|2|3|4|float1|float2|float3|float4|short1|short2|short3|short4|ubyte4|colour|colour_argb|colour_abgr) "2"
 	tangents					(true|false)	"false"
 	tangent_dimensions			(3|4)			"3"
 	binormals					(true|false)	"false">
-<!ELEMENT vertex (position, normal?, tangent?, binormal?, colour_diffuse?, colour_specular?, 
+<!ELEMENT vertex (position?, normal?, tangent?, binormal?, colour_diffuse?, colour_specular?, 
 	texcoord*)>
 <!ELEMENT position EMPTY>
 <!ATTLIST position 

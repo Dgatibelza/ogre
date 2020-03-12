@@ -29,9 +29,6 @@ THE SOFTWARE.
 #include "OgreAnimationTrack.h"
 #include "OgreAnimation.h"
 #include "OgreKeyFrame.h"
-#include "OgreNode.h"
-#include "OgreMesh.h"
-#include "OgreException.h"
 
 namespace Ogre {
 
@@ -101,10 +98,10 @@ namespace Ogre {
         {
             // Wrap time
             Real totalAnimationLength = mParent->getLength();
-            assert(totalAnimationLength > 0.0f && "Invalid animation length!");
+            OgreAssertDbg(totalAnimationLength > 0.0f, "Invalid animation length!");
 
             if( timePos > totalAnimationLength && totalAnimationLength > 0.0f )
-                timePos = fmod( timePos, totalAnimationLength );
+                timePos = std::fmod( timePos, totalAnimationLength );
 
             // No global keyframe index, need to search with local keyframes.
             KeyFrame timeKey(0, timePos);
@@ -204,13 +201,13 @@ namespace Ogre {
 
     }
     //---------------------------------------------------------------------
-    void AnimationTrack::_collectKeyFrameTimes(vector<Real>::type& keyFrameTimes)
+    void AnimationTrack::_collectKeyFrameTimes(std::vector<Real>& keyFrameTimes)
     {
         for (KeyFrameList::const_iterator i = mKeyFrames.begin(); i != mKeyFrames.end(); ++i)
         {
             Real timePos = (*i)->getTime();
 
-            vector<Real>::type::iterator it =
+            std::vector<Real>::iterator it =
                 std::lower_bound(keyFrameTimes.begin(), keyFrameTimes.end(), timePos);
             if (it == keyFrameTimes.end() || *it != timePos)
             {
@@ -219,7 +216,7 @@ namespace Ogre {
         }
     }
     //---------------------------------------------------------------------
-    void AnimationTrack::_buildKeyFrameIndexMap(const vector<Real>::type& keyFrameTimes)
+    void AnimationTrack::_buildKeyFrameIndexMap(const std::vector<Real>& keyFrameTimes)
     {
         // Pre-allocate memory
         mKeyFrameIndexMap.resize(keyFrameTimes.size() + 1);
@@ -609,7 +606,7 @@ namespace Ogre {
         Quaternion lastorientation;
         KeyFrameList::iterator i = mKeyFrames.begin();
         Radian quatTolerance(1e-3f);
-        list<unsigned short>::type removeList;
+        std::list<unsigned short> removeList;
         unsigned short k = 0;
         ushort dupKfCount = 0;
         for (; i != mKeyFrames.end(); ++i, ++k)
@@ -646,7 +643,7 @@ namespace Ogre {
         }
 
         // Now remove keyframes, in reverse order to avoid index revocation
-        list<unsigned short>::type::reverse_iterator r = removeList.rbegin();
+        std::list<unsigned short>::reverse_iterator r = removeList.rbegin();
         for (; r!= removeList.rend(); ++r)
         {
             removeKeyFrame(*r);
@@ -1032,11 +1029,11 @@ namespace Ogre {
             {
                 // look for keyframes which have a pose influence which is non-zero
                 const VertexPoseKeyFrame* kf = static_cast<const VertexPoseKeyFrame*>(*i);
-                VertexPoseKeyFrame::ConstPoseRefIterator poseIt
-                    = kf->getPoseReferenceIterator();
-                while (poseIt.hasMoreElements())
+                VertexPoseKeyFrame::PoseRefList::const_iterator poseIt
+                    = kf->getPoseReferences().begin();
+                for (;poseIt != kf->getPoseReferences().end(); ++poseIt)
                 {
-                    const VertexPoseKeyFrame::PoseRef& poseRef = poseIt.getNext();
+                    const VertexPoseKeyFrame::PoseRef& poseRef = *poseIt;
                     if (poseRef.influence > 0.0f)
                         return true;
                 }

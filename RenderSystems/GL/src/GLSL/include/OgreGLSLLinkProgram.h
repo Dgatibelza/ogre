@@ -44,32 +44,24 @@ namespace Ogre {
     class _OgreGLExport GLSLLinkProgram : public GLSLProgramCommon
     {
     private:
-        /// Linked geometry program
-        GLSLProgram* mGeometryProgram;
-        /// Linked fragment program
-        GLSLProgram* mFragmentProgram;
         GLUniformCache *mUniformCache;
-
-        /// Flag to indicate that uniform references have already been built
-        bool        mUniformRefsBuilt;
 
         /// Build uniform references from active named uniforms
         void buildGLUniformReferences(void);
         /// Extract attributes
         void extractAttributes(void);
 
-        typedef set<GLuint>::type AttributeSet;
+        typedef std::set<GLuint> AttributeSet;
         /// Custom attribute bindings
         AttributeSet mValidAttributes;
 
-        String getCombinedName();       
         /// Compiles and links the the vertex and fragment programs
         void compileAndLink();
         /// Get the the binary data of a program from the microcode cache
-        void getMicrocodeFromCache();
+        void getMicrocodeFromCache(uint32 id);
     public:
         /// Constructor should only be used by GLSLLinkProgramManager
-        GLSLLinkProgram(GLSLProgram* vertexProgram, GLSLProgram* geometryProgram, GLSLProgram* fragmentProgram);
+        explicit GLSLLinkProgram(const GLShaderList& shaders);
         ~GLSLLinkProgram(void);
 
         /** Makes a program object active by making sure it is linked and then putting it in use.
@@ -77,17 +69,13 @@ namespace Ogre {
         */
         void activate(void);
 
+        bool isAttributeValid(VertexElementSemantic semantic, uint index);
+        
         /** Updates program object uniforms using data from GpuProgramParameters.
         normally called by GLSLGpuProgram::bindParameters() just before rendering occurs.
         */
         void updateUniforms(GpuProgramParametersSharedPtr params, uint16 mask, GpuProgramType fromProgType);
 
-        void updateUniformBlocks(GpuProgramParametersSharedPtr params, uint16 mask, GpuProgramType fromProgType) {}
-
-        /** Updates program object uniforms using data from pass iteration GpuProgramParameters.
-        normally called by GLSLGpuProgram::bindMultiPassParameters() just before multi pass rendering occurs.
-        */
-        void updatePassIterationUniforms(GpuProgramParametersSharedPtr params);
         /// Get the GL Handle for the program object
         GLhandleARB getGLHandle(void) const { return mGLProgramHandle; }
     };

@@ -139,7 +139,7 @@ namespace Ogre
         // Page Strategy Data
         bool strategyDataOk = mStrategyData->load(ser);
         if (!strategyDataOk)
-            LogManager::getSingleton().stream() << "Error: PageStrategyData for section '"
+            LogManager::getSingleton().stream(LML_CRITICAL) << "Error: PageStrategyData for section '"
             << mName << "' was not loaded correctly, check file contents";
 
         /// Load any data specific to a subtype of this class
@@ -205,8 +205,7 @@ namespace Ogre
         {
             Page* page = OGRE_NEW Page(pageID, this);
             // try to insert
-            std::pair<PageMap::iterator, bool> ret = mPages.insert(
-                PageMap::value_type(page->getID(), page));
+            std::pair<PageMap::iterator, bool> ret = mPages.emplace(page->getID(), page);
 
             if (!ret.second)
             {

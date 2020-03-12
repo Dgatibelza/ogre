@@ -27,11 +27,8 @@ THE SOFTWARE.
 */
 
 #include "OgreStableHeaders.h"
-#include "OgreCommon.h"
-#include "OgreSceneManager.h"
-#include "OgreLight.h"
+
 #include "OgreShadowCameraSetup.h"
-#include "OgreCamera.h"
 #include "OgreViewport.h"
 
 
@@ -106,24 +103,17 @@ namespace Ogre
                 // Use camera up
                 up = Vector3::UNIT_Z;
              }
-             // cross twice to rederive, only direction is unaltered
-             Vector3 left = dir.crossProduct(up);
-             left.normalise();
-             up = dir.crossProduct(left);
-             up.normalise();
-             // Derive quaternion from axes
-             Quaternion q;
-             q.FromAxes(left, up, dir);
+             Matrix3 rot = Math::lookRotation(dir, up);
 
              //convert world space camera position into light space
-             Vector3 lightSpacePos = q.Inverse() * pos;
+             Vector3 lightSpacePos = rot.transpose() * pos;
              
              //snap to nearest texel
-             lightSpacePos.x -= fmod(lightSpacePos.x, worldTexelSize);
-             lightSpacePos.y -= fmod(lightSpacePos.y, worldTexelSize);
+             lightSpacePos.x -= std::fmod(lightSpacePos.x, worldTexelSize);
+             lightSpacePos.y -= std::fmod(lightSpacePos.y, worldTexelSize);
 
              //convert back to world space
-             pos = q * lightSpacePos;
+             pos = rot * lightSpacePos;
             
         }
         // Spotlight
@@ -167,7 +157,7 @@ namespace Ogre
         }
 
         // Finally set position
-        texCam->setPosition(pos);
+        texCam->getParentSceneNode()->setPosition(pos);
 
         // Calculate orientation based on direction calculated above
         /*
@@ -192,15 +182,7 @@ namespace Ogre
             // Use camera up
             up = Vector3::UNIT_Z;
         }
-        // cross twice to rederive, only direction is unaltered
-        Vector3 left = dir.crossProduct(up);
-        left.normalise();
-        up = dir.crossProduct(left);
-        up.normalise();
-        // Derive quaternion from axes
-        Quaternion q;
-        q.FromAxes(left, up, dir);
-        texCam->setOrientation(q);
+        texCam->getParentNode()->setOrientation(Math::lookRotation(dir, up));
     }
 
 

@@ -25,33 +25,10 @@ same license as the rest of the engine.
 #include "Julia.h"
 
 namespace {
-TexturePtr ptex;
 SimpleRenderable *vrend;
 SimpleRenderable *trend;
 SceneNode *snode,*fnode;
-AnimationState* mOgreAnimState = 0;
 }
-
-#ifndef OGRE_STATIC_LIB
-
-static SamplePlugin* sp;
-static Sample* s;
-
-extern "C" _OgreSampleExport void dllStartPlugin()
-{
-    s = new Sample_VolumeTex;
-    sp = OGRE_NEW SamplePlugin(s->getInfo()["Title"] + " Sample");
-    sp->addSample(s);
-    Root::getSingleton().installPlugin(sp);
-}
-
-extern "C" _OgreSampleExport void dllStopPlugin()
-{
-    Root::getSingleton().uninstallPlugin(sp);
-    OGRE_DELETE sp;
-    delete s;
-}
-#endif
 
 void Sample_VolumeTex::setupContent()
 {
@@ -61,7 +38,7 @@ void Sample_VolumeTex::setupContent()
     }
     // Create dynamic texture
     ptex = TextureManager::getSingleton().createManual(
-                "DynaTex","VolumeRenderable", TEX_TYPE_3D, 64, 64, 64, 0, PF_A8R8G8B8);
+                "DynaTex","VolumeRenderable", TEX_TYPE_3D, 64, 64, 64, 0, PF_BYTE_RGBA);
 
     // Set ambient light
     mSceneMgr->setAmbientLight(ColourValue(0.6, 0.6, 0.6));
@@ -107,8 +84,10 @@ void Sample_VolumeTex::setupContent()
     key = track->createNodeKeyFrame(10);//C
     key->setTranslate(Vector3(0.0f, -15.0f, 0.0f));
     // Create a new animation state to track this
-    mOgreAnimState = mSceneMgr->createAnimationState("OgreTrack");
-    mOgreAnimState->setEnabled(true);
+    auto animState = mSceneMgr->createAnimationState("OgreTrack");
+    animState->setEnabled(true);
+    auto& controllerMgr = ControllerManager::getSingleton();
+    controllerMgr.createFrameTimePassthroughController(AnimationStateControllerValue::create(animState, true));
 
     //mFountainNode->attachObject(pSys2);
 
@@ -120,7 +99,7 @@ void Sample_VolumeTex::setupContent()
     // show GUI
     createControls();
 
-    setDragLook(true);
+    mCameraMan->setStyle(CS_ORBIT);
 
     generate();
 }
@@ -130,7 +109,6 @@ bool Sample_VolumeTex::frameRenderingQueued(const FrameEvent &evt)
     //snode->roll(Degree(evt.timeSinceLastFrame * 20.0f));
     //fnode->roll(Degree(evt.timeSinceLastFrame * 20.0f));
     static_cast<ThingRenderable*>(trend)->addTime(evt.timeSinceLastFrame * 0.05f);
-    mOgreAnimState->addTime(evt.timeSinceLastFrame);
     return SdkSample::frameRenderingQueued(evt);
 }
 
@@ -160,7 +138,7 @@ void Sample_VolumeTex::generate()
     d << "PixelBox " << pb.getWidth() << " " << pb.getHeight() << " " << pb.getDepth() << " " << pb.rowPitch << " " << pb.slicePitch << " " << pb.data << " " << PixelUtil::getFormatName(pb.format);
     LogManager::getSingleton().logMessage(d.str());
 
-    Ogre::uint32 *pbptr = static_cast<Ogre::uint32*>(pb.data);
+    Ogre::uint32 *pbptr = reinterpret_cast<Ogre::uint32*>(pb.data);
     for(size_t z=pb.front; z<pb.back; z++)
     {
         for(size_t y=pb.top; y<pb.bottom; y++)
@@ -181,7 +159,7 @@ void Sample_VolumeTex::generate()
                     if(val > vcut)
                         val = vcut;
 
-                    PixelUtil::packColour((float)x/pb.getWidth(), (float)y/pb.getHeight(), (float)z/pb.getDepth(), (1.0f-(val*vscale))*0.7f, PF_A8R8G8B8, &pbptr[x]);
+                    PixelUtil::packColour((float)x/pb.getWidth(), (float)y/pb.getHeight(), (float)z/pb.getDepth(), (1.0f-(val*vscale))*0.7f, PF_BYTE_RGBA, &pbptr[x]);
 
                 }
             }

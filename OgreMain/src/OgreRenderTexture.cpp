@@ -28,8 +28,8 @@ THE SOFTWARE.
 #include "OgreStableHeaders.h"
 
 #include "OgreRenderTexture.h"
-#include "OgreException.h"
 #include "OgreHardwarePixelBuffer.h"
+#include "OgreDepthBuffer.h"
 
 namespace Ogre
 {
@@ -43,6 +43,9 @@ namespace Ogre
         mHeight = mBuffer->getHeight();
         mColourDepth = static_cast<unsigned int>(
             Ogre::PixelUtil::getNumElemBits(mBuffer->getFormat()));
+
+        if(PixelUtil::isDepth(mBuffer->getFormat()))
+            mDepthBufferPoolId = DepthBuffer::POOL_NO_DEPTH;
     }
     RenderTexture::~RenderTexture()
     {
@@ -74,6 +77,20 @@ namespace Ogre
         /// Width and height is unknown with no targets attached
         mWidth = mHeight = 0;
     }
+    void MultiRenderTarget::bindSurface(size_t attachment, RenderTexture* target)
+    {
+        if(PixelUtil::isDepth(target->suggestPixelFormat()))
+            setDepthBufferPool(DepthBuffer::POOL_NO_DEPTH); // unbinds any previously bound depth render buffer
+
+        for (size_t i = mBoundSurfaces.size(); i <= attachment; ++i)
+        {
+            mBoundSurfaces.push_back(0);
+        }
+        mBoundSurfaces[attachment] = target;
+
+        bindSurfaceImpl(attachment, target);
+    }
+
     //-----------------------------------------------------------------------------
     void MultiRenderTarget::copyContentsToMemory(const Box& src, const PixelBox &dst, FrameBuffer buffer)
     {

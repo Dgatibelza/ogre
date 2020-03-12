@@ -31,6 +31,14 @@
 
 namespace Ogre
 {
+    String FileSystemLayer::resolveBundlePath(String path)
+    {
+        if(!path.empty() && path[0] != '/')             // only adjust relative dirs
+            path = macBundlePath() + "/" + path;
+
+        return path;
+    }
+
     void FileSystemLayer::getConfigPaths()
     {
         mConfigPaths.push_back(Ogre::macBundlePath() + "/Contents/Resources/");
@@ -52,22 +60,13 @@ namespace Ogre
 
         if (!mHomePath.empty())
         {
-            // create an Ogre subdir in application support
-            mHomePath.append("/Library/Application Support/Ogre/");
+            mHomePath.append("/Library/Application Support/");
+            // now create the given subdir
+            mHomePath.append(subdir + '/');
             if (mkdir(mHomePath.c_str(), 0755) != 0 && errno != EEXIST)
             {
                 // can't create dir
                 mHomePath.clear();
-            }
-            else
-            {
-                // now create the given subdir
-                mHomePath.append(subdir + '/');
-                if (mkdir(mHomePath.c_str(), 0755) != 0 && errno != EEXIST)
-                {
-                    // can't create dir
-                    mHomePath.clear();
-                }
             }
         }
 

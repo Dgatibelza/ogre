@@ -32,7 +32,7 @@ fragment_program Ogre/Compositor/HalftoneFPGLSL glsl
 fragment_program Ogre/Compositor/HalftoneFPGLSLES glsles
 {
 	source HalftoneFP.glsles
-	syntax glsles
+	syntax glsl300es
 	
 	default_params
 	{
@@ -83,7 +83,6 @@ material Ogre/Compositor/Halftone
 
 			texture_unit noise
 			{
-				texture HalftoneVolume
 				tex_coord_set 0
 				filtering trilinear
 				tex_address_mode clamp

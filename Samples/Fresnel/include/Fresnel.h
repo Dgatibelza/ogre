@@ -9,6 +9,9 @@ using namespace OgreBites;
 class _OgreSampleClassExport Sample_Fresnel : public SdkSample, public RenderTargetListener
 {
 public:
+    static const uint32 SUBMERGED_MASK = 0x0F0;
+    static const uint32 SURFACE_MASK = 0x00F;
+    static const uint32 WATER_MASK = 0xF00;
 
     Sample_Fresnel() : NUM_FISH(30), NUM_FISH_WAYPOINTS(10), FISH_PATH_LENGTH(200), FISH_SCALE(2)
     {
@@ -22,7 +25,7 @@ public:
     {
         StringVector names;
 		if(!GpuProgramManager::getSingleton().isSyntaxSupported("glsles")
-		&& !GpuProgramManager::getSingleton().isSyntaxSupported("glsl150")
+		&& !GpuProgramManager::getSingleton().isSyntaxSupported("glsl")
 		&& !GpuProgramManager::getSingleton().isSyntaxSupported("hlsl"))
             names.push_back("Cg Program Manager");
         return names;
@@ -30,12 +33,6 @@ public:
 
     void testCapabilities(const RenderSystemCapabilities* caps)
     {
-        if (!caps->hasCapability(RSC_VERTEX_PROGRAM) || !caps->hasCapability(RSC_FRAGMENT_PROGRAM))
-        {
-            OGRE_EXCEPT(Exception::ERR_NOT_IMPLEMENTED, "Your graphics card does not support vertex and fragment"
-                " programs, so you cannot run this sample. Sorry!", "FresnelSample::testCapabilities");
-        }
-
         if (!GpuProgramManager::getSingleton().isSyntaxSupported("arbfp1") &&
             !GpuProgramManager::getSingleton().isSyntaxSupported("ps_4_0") &&
             !GpuProgramManager::getSingleton().isSyntaxSupported("ps_2_0") &&
@@ -70,36 +67,12 @@ public:
 
     void preRenderTargetUpdate(const RenderTargetEvent& evt)
     {
-        mWater->setVisible(false);  // hide the water
-
-        if (evt.source == mReflectionTarget)  // for reflection, turn on camera reflection and hide submerged entities
-        {
-            mCamera->enableReflection(mWaterPlane);
-            for (std::vector<Entity*>::iterator i = mSubmergedEnts.begin(); i != mSubmergedEnts.end(); i++)
-                (*i)->setVisible(false);
-        }
-        else  // for refraction, hide surface entities
-        {
-            for (std::vector<Entity*>::iterator i = mSurfaceEnts.begin(); i != mSurfaceEnts.end(); i++)
-                (*i)->setVisible(false);
-        }
+        mCamera->enableReflection(mWaterPlane);
     }
 
     void postRenderTargetUpdate(const RenderTargetEvent& evt)
     {
-        mWater->setVisible(true);  // unhide the water
-
-        if (evt.source == mReflectionTarget)  // for reflection, turn off camera reflection and unhide submerged entities
-        {
-            mCamera->disableReflection();
-            for (std::vector<Entity*>::iterator i = mSubmergedEnts.begin(); i != mSubmergedEnts.end(); i++)
-                (*i)->setVisible(true);
-        }
-        else  // for refraction, unhide surface entities
-        {
-            for (std::vector<Entity*>::iterator i = mSurfaceEnts.begin(); i != mSurfaceEnts.end(); i++)
-                (*i)->setVisible(true);
-        }
+        mCamera->disableReflection();
     }
 
 protected:
@@ -116,11 +89,19 @@ protected:
         // make the scene's main light come from above
         Light* l = mSceneMgr->createLight();
         l->setType(Light::LT_DIRECTIONAL);
-        l->setDirection(Vector3::NEGATIVE_UNIT_Y);
+
+        auto ln = mSceneMgr->getRootSceneNode()->createChildSceneNode();
+        ln->setDirection(Vector3::NEGATIVE_UNIT_Y);
+        ln->attachObject(l);
 
         setupWater();
         setupProps();
         setupFish();
+
+        for (auto e : mSurfaceEnts)
+            e->setVisibilityFlags(SURFACE_MASK);
+        for (auto e : mSubmergedEnts)
+            e->setVisibilityFlags(SUBMERGED_MASK);
     }
 
     void setupWater()
@@ -132,9 +113,23 @@ protected:
             TexturePtr tex = TextureManager::getSingleton().createManual(i == 0 ? "refraction" : "reflection",
                 ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME, TEX_TYPE_2D, 512, 512, 0, PF_R8G8B8, TU_RENDERTARGET);
 
+            MaterialManager::getSingleton()
+                .getByName("Examples/FresnelReflectionRefraction", ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME)
+                ->getTechnique(0)
+                ->getPass(0)
+                ->getTextureUnitState(tex->getName())
+                ->setTexture(tex);
+
             RenderTarget* rtt = tex->getBuffer()->getRenderTarget();
-            rtt->addViewport(mCamera)->setOverlaysEnabled(false);
-            rtt->addListener(this);
+            Viewport* vp = rtt->addViewport(mCamera);
+
+            // for refraction, only render submerged entities
+            // for reflection, only render surface entities
+            vp->setVisibilityMask(i == 0 ? SUBMERGED_MASK : SURFACE_MASK);
+            vp->setOverlaysEnabled(false);
+
+            // toggle reflection in camera
+            if(i == 1) rtt->addListener(this);
 
             if (i == 0) mRefractionTarget = rtt;
             else mReflectionTarget = rtt;
@@ -149,13 +144,14 @@ protected:
         mWater = mSceneMgr->createEntity("Water", "water");
         mWater->setMaterialName("Examples/FresnelReflectionRefraction");
         mSceneMgr->getRootSceneNode()->attachObject(mWater);
+
+        // hide the water from the render textures
+        mWater->setVisibilityFlags(WATER_MASK);
     }
 
     void windowUpdate()
     {
-#if OGRE_PLATFORM != OGRE_PLATFORM_NACL
         mWindow->update();
-#endif
     }
 
     void setupProps()

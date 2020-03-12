@@ -31,13 +31,13 @@ THE SOFTWARE.
 
 #include "OgreGLES2Prerequisites.h"
 #include "OgreHardwareBufferManager.h"
-#include "OgreGLES2Support.h"
+#include "OgreGLES2RenderSystem.h"
 
 namespace Ogre {
     class GLES2StateCacheManager;
 
     /** Implementation of HardwareBufferManager for OpenGL ES. */
-    class _OgreGLES2Export GLES2HardwareBufferManagerBase : public HardwareBufferManagerBase
+    class _OgreGLES2Export GLES2HardwareBufferManager : public HardwareBufferManager
     {
         protected:
             GLES2RenderSystem* mRenderSystem;
@@ -47,8 +47,8 @@ namespace Ogre {
             void destroyVertexDeclarationImpl(VertexDeclaration* decl);
 
         public:
-            GLES2HardwareBufferManagerBase();
-            virtual ~GLES2HardwareBufferManagerBase();
+            GLES2HardwareBufferManager();
+            virtual ~GLES2HardwareBufferManager();
             /// Creates a vertex buffer
             HardwareVertexBufferSharedPtr createVertexBuffer(size_t vertexSize,
                 size_t numVerts, HardwareBuffer::Usage usage, bool useShadowBuffer = false);
@@ -63,40 +63,12 @@ namespace Ogre {
             /// Create a uniform buffer
             HardwareUniformBufferSharedPtr createUniformBuffer(size_t sizeBytes, HardwareBuffer::Usage usage,
                                                                bool useShadowBuffer, size_t binding, const String& name = "");
-            HardwareCounterBufferSharedPtr createCounterBuffer(size_t sizeBytes,
-                                                               HardwareBuffer::Usage usage = HardwareBuffer::HBU_DYNAMIC_WRITE_ONLY_DISCARDABLE,
-                                                               bool useShadowBuffer = false, const String& name = "");
-
             /// Utility function to get the correct GL type based on VET's
             static GLenum getGLType(VertexElementType type);
 
             GLES2StateCacheManager * getStateCacheManager();
             void notifyContextDestroyed(GLContext* context);
     };
-
-    /// GLES2HardwareBufferManagerBase as a Singleton
-    class _OgreGLES2Export GLES2HardwareBufferManager : public HardwareBufferManager
-    {
-    public:
-        GLES2HardwareBufferManager()
-            : HardwareBufferManager(OGRE_NEW GLES2HardwareBufferManagerBase()) 
-        {
-
-        }
-        ~GLES2HardwareBufferManager()
-        {
-            OGRE_DELETE mImpl;
-        }
-
-        /// Utility function to notify context depended resources
-        void notifyContextDestroyed(GLContext* context)
-            { static_cast<GLES2HardwareBufferManagerBase*>(mImpl)->notifyContextDestroyed(context); }
-
-        /// Utility function to get the correct GL type based on VET's
-        static GLenum getGLType(VertexElementType type)
-            { return GLES2HardwareBufferManagerBase::getGLType(type); }
-    };
-
 }
 
 #endif

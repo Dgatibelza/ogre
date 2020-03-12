@@ -17,7 +17,7 @@ same license as the rest of the engine.
 #include "OgrePrerequisites.h"
 #include "OgreSimpleRenderable.h"
 #include "OgreQuaternion.h"
-#include "OgreVector3.h"
+#include "OgreVector.h"
 
 /** Quad fragments that rotate around origin (0,0,0) in a random orbit, always oriented to 0,0,0.
     @author W.J. van der Laan
@@ -52,8 +52,8 @@ protected:
     float mRadius;
     size_t mCount;
     float mQSize;
-    Ogre::vector <Ogre::Quaternion>::type things;
-    Ogre::vector <Ogre::Quaternion>::type orbits;
+    std::vector <Ogre::Quaternion> things;
+    std::vector <Ogre::Quaternion> orbits;
 };
 
 #endif

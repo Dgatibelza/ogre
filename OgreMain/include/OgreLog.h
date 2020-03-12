@@ -34,13 +34,6 @@ THE SOFTWARE.
 #include "Threading/OgreThreadHeaders.h"
 #include "OgreHeaderPrefix.h"
 
-#if OGRE_PLATFORM == OGRE_PLATFORM_NACL
-namespace pp
-{
-    class Instance;
-}
-#endif
-
 namespace Ogre {
 
     /** \addtogroup Core
@@ -67,7 +60,8 @@ namespace Ogre {
     {
         LML_TRIVIAL = 1,
         LML_NORMAL = 2,
-        LML_CRITICAL = 3
+        LML_WARNING = 3,
+        LML_CRITICAL = 4
     };
 
     /** @remarks Pure Abstract class, derive this class and register to the Log to listen to log messages */
@@ -109,8 +103,9 @@ namespace Ogre {
         bool            mSuppressFile;
         bool            mTimeStamp;
         String          mLogName;
+        bool            mTermHasColours;
 
-        typedef vector<LogListener*>::type mtLogListener;
+        typedef std::vector<LogListener*> mtLogListener;
         mtLogListener mListeners;
     public:
 
@@ -250,12 +245,6 @@ namespace Ogre {
 
 
         };
-#if OGRE_PLATFORM == OGRE_PLATFORM_NACL
-    protected:
-        static pp::Instance* mInstance;
-    public:
-        static void setInstance(pp::Instance* instance) {mInstance = instance;};
-#endif
 
     };
     /** @} */

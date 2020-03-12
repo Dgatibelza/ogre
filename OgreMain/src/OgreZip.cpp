@@ -28,59 +28,179 @@ THE SOFTWARE.
 #include "OgreStableHeaders.h"
 
 #if OGRE_NO_ZIP_ARCHIVE == 0
-
-//#include "OgreZip.h"
-
-#include "OgreLogManager.h"
-#include "OgreException.h"
+// workaround for Wundef in zzip/conf.h
+#ifndef __GNUC_MINOR_
+#define __GNUC_MINOR_ 0
+#endif
 
 #include <zzip/zzip.h>
 #include <zzip/plugin.h>
 
+#ifdef _OGRE_FILESYSTEM_ARCHIVE_UNICODE
+#   define WIN32_LEAN_AND_MEAN
+#   include <windows.h>
+#   include <stringapiset.h>
+#endif
 
 namespace Ogre {
+namespace {
+    class ZipArchive : public Archive
+    {
+    protected:
+        /// Handle to root zip file
+        ZZIP_DIR* mZzipDir;
+        /// File list (since zziplib seems to only allow scanning of dir tree once)
+        FileInfoList mFileList;
+        /// A pointer to file io alternative implementation
+        const zzip_plugin_io_handlers* mPluginIo;
+
+        OGRE_AUTO_MUTEX;
+    public:
+        ZipArchive(const String& name, const String& archType, const zzip_plugin_io_handlers* pluginIo);
+        ~ZipArchive();
+        /// @copydoc Archive::isCaseSensitive
+        bool isCaseSensitive(void) const { return OGRE_RESOURCEMANAGER_STRICT != 0; }
+
+        /// @copydoc Archive::load
+        void load();
+        /// @copydoc Archive::unload
+        void unload();
+
+        /// @copydoc Archive::open
+        DataStreamPtr open(const String& filename, bool readOnly = true) const;
+
+        /// @copydoc Archive::create
+        DataStreamPtr create(const String& filename);
+
+        /// @copydoc Archive::remove
+        void remove(const String& filename);
+
+        /// @copydoc Archive::list
+        StringVectorPtr list(bool recursive = true, bool dirs = false) const;
+
+        /// @copydoc Archive::listFileInfo
+        FileInfoListPtr listFileInfo(bool recursive = true, bool dirs = false) const;
+
+        /// @copydoc Archive::find
+        StringVectorPtr find(const String& pattern, bool recursive = true,
+            bool dirs = false) const;
+
+        /// @copydoc Archive::findFileInfo
+        FileInfoListPtr findFileInfo(const String& pattern, bool recursive = true,
+            bool dirs = false) const;
+
+        /// @copydoc Archive::exists
+        bool exists(const String& filename) const;
+
+        /// @copydoc Archive::getModifiedTime
+        time_t getModifiedTime(const String& filename) const;
+    };
+
+    /** Specialisation of DataStream to handle streaming data from zip archives. */
+    class ZipDataStream : public DataStream
+    {
+    protected:
+        ZZIP_FILE* mZzipFile;
+        /// We need caching because sometimes serializers step back in data stream and zziplib behaves slow
+        StaticCache<2 * OGRE_STREAM_TEMP_SIZE> mCache;
+    public:
+        /// Constructor for creating named streams
+        ZipDataStream(const String& name, ZZIP_FILE* zzipFile, size_t uncompressedSize);
+        ~ZipDataStream();
+        /// @copydoc DataStream::read
+        size_t read(void* buf, size_t count);
+        /// @copydoc DataStream::write
+        size_t write(const void* buf, size_t count);
+        /// @copydoc DataStream::skip
+        void skip(long count);
+        /// @copydoc DataStream::seek
+        void seek( size_t pos );
+        /// @copydoc DataStream::seek
+        size_t tell(void) const;
+        /// @copydoc DataStream::eof
+        bool eof(void) const;
+        /// @copydoc DataStream::close
+        void close(void);
+    };
 
     /// Utility method to format out zzip errors
-    String getZzipErrorDescription(zzip_error_t zzipError) 
+    static String getErrorDescription(zzip_error_t zzipError, const String& file)
     {
-        String errorMsg;
+        const char* errorMsg = "";
         switch (zzipError)
         {
         case ZZIP_NO_ERROR:
             break;
         case ZZIP_OUTOFMEM:
-            errorMsg = "Out of memory.";
+            errorMsg = "Out of memory";
             break;            
         case ZZIP_DIR_OPEN:
+            errorMsg = "Unable to open zip file";
+            break;
         case ZZIP_DIR_STAT: 
         case ZZIP_DIR_SEEK:
         case ZZIP_DIR_READ:
-            errorMsg = "Unable to read zip file.";
+            errorMsg = "Unable to read zip file";
             break;            
         case ZZIP_UNSUPP_COMPR:
-            errorMsg = "Unsupported compression format.";
+            errorMsg = "Unsupported compression format";
             break;            
         case ZZIP_CORRUPTED:
-            errorMsg = "Corrupted archive.";
+            errorMsg = "Corrupted archive";
             break;
         case ZZIP_DIR_TOO_SHORT:
-            errorMsg = "Zip file is too short.";
+            errorMsg = "Zip file is too short";
             break;
         case ZZIP_DIR_EDH_MISSING:
-            errorMsg = "Zip-file's central directory record missing. Is this a 7z file?";
+            errorMsg = "Zip-file's central directory record missing. Is this a 7z file";
             break;
         case ZZIP_ENOENT:
-            errorMsg = "File not in archive.";
+            errorMsg = "File not in archive";
             break;
         default:
-            errorMsg = "Unknown error.";
+            errorMsg = "Unknown error";
             break;            
         };
 
-        return errorMsg;
+        return StringUtil::format("%s '%s'", errorMsg, file.c_str());
     }
+
+#ifdef _OGRE_FILESYSTEM_ARCHIVE_UNICODE
+    int wopen_wrapper(const char* filename, int oflag, ...)
+    {
+        int utf16Length = ::MultiByteToWideChar(CP_UTF8, 0, filename, (int)strlen(filename), NULL, 0);
+        if (utf16Length > 0)
+        {
+            std::wstring wt;
+            wt.resize(utf16Length);
+            if (0 != ::MultiByteToWideChar(CP_UTF8, 0, filename, (int)strlen(filename), &wt[0],
+                                           (int)wt.size()))
+                return _wopen(wt.c_str(), oflag);
+        }
+
+        return -1;
+    }
+#endif
+
+    const zzip_plugin_io_handlers* getDefaultIO()
+    {
+        static zzip_plugin_io_handlers defaultIO;
+        static bool isInit = false;
+
+        if (!isInit)
+        {
+            zzip_init_io(&defaultIO, 1);
+#ifdef _OGRE_FILESYSTEM_ARCHIVE_UNICODE
+            defaultIO.fd.open = wopen_wrapper;
+#endif
+            isInit = true;
+        }
+
+        return &defaultIO;
+    }
+}
     //-----------------------------------------------------------------------
-    ZipArchive::ZipArchive(const String& name, const String& archType, zzip_plugin_io_handlers* pluginIo)
+    ZipArchive::ZipArchive(const String& name, const String& archType, const zzip_plugin_io_handlers* pluginIo)
         : Archive(name, archType), mZzipDir(0), mPluginIo(pluginIo)
     {
     }
@@ -97,7 +217,8 @@ namespace Ogre {
         {
             zzip_error_t zzipError;
             mZzipDir = zzip_dir_open_ext_io(mName.c_str(), &zzipError, 0, mPluginIo);
-            checkZzipError(zzipError, "opening archive");
+            if (zzipError)
+                OGRE_EXCEPT(Exception::ERR_INTERNAL_ERROR, getErrorDescription(zzipError, mName));
 
             // Cache names
             ZZIP_DIRENT zzipEntry;
@@ -178,11 +299,7 @@ namespace Ogre {
 
         if (!zzipFile)
         {
-            int zerr = zzip_error(mZzipDir);
-            String zzDesc = getZzipErrorDescription((zzip_error_t)zerr);
-
-            OGRE_EXCEPT(Exception::ERR_FILE_NOT_FOUND,
-                    mName+ " Cannot open file: " + lookUpFileName + " - "+zzDesc, "ZipArchive::open");
+            OGRE_EXCEPT(Exception::ERR_FILE_NOT_FOUND, getErrorDescription((zzip_error_t)zzip_error(mZzipDir), mName));
         }
 
         // Get uncompressed size too
@@ -245,7 +362,7 @@ namespace Ogre {
         // If pattern contains a directory name, do a full match
         bool full_match = (pattern.find ('/') != String::npos) ||
                           (pattern.find ('\\') != String::npos);
-        bool wildCard = pattern.find("*") != String::npos;
+        bool wildCard = pattern.find('*') != String::npos;
             
         FileInfoList::const_iterator i, iend;
         iend = mFileList.end();
@@ -267,7 +384,7 @@ namespace Ogre {
         // If pattern contains a directory name, do a full match
         bool full_match = (pattern.find ('/') != String::npos) ||
                           (pattern.find ('\\') != String::npos);
-        bool wildCard = pattern.find("*") != String::npos;
+        bool wildCard = pattern.find('*') != String::npos;
 
         FileInfoList::const_iterator i, iend;
         iend = mFileList.end();
@@ -294,7 +411,7 @@ namespace Ogre {
         OGRE_LOCK_AUTO_MUTEX;
         String cleanName = filename;
 #if !OGRE_RESOURCEMANAGER_STRICT
-        if(filename.rfind("/") != String::npos)
+        if(filename.rfind('/') != String::npos)
         {
             StringVector tokens = StringUtil::split(filename, "/");
             cleanName = tokens[tokens.size() - 1];
@@ -320,26 +437,6 @@ namespace Ogre {
             return 0;
         }
 
-    }
-    //-----------------------------------------------------------------------
-    void ZipArchive::checkZzipError(int zzipError, const String& operation) const
-    {
-        if (zzipError != ZZIP_NO_ERROR)
-        {
-            String errorMsg = getZzipErrorDescription(static_cast<zzip_error_t>(zzipError));
-
-            OGRE_EXCEPT(Exception::ERR_INTERNAL_ERROR, 
-                mName + " - error whilst " + operation + ": " + errorMsg,
-                "ZipArchive::checkZzipError");
-        }
-    }
-    //-----------------------------------------------------------------------
-    //-----------------------------------------------------------------------
-    //-----------------------------------------------------------------------
-    ZipDataStream::ZipDataStream(ZZIP_FILE* zzipFile, size_t uncompressedSize)
-        : mZzipFile(zzipFile)
-    {
-        mSize = uncompressedSize;
     }
     //-----------------------------------------------------------------------
     ZipDataStream::ZipDataStream(const String& name, ZZIP_FILE* zzipFile, size_t uncompressedSize)
@@ -425,6 +522,7 @@ namespace Ogre {
     //-----------------------------------------------------------------------
     void ZipDataStream::close(void)
     {
+        mAccess = 0;
         if (mZzipFile != 0)
         {
             zzip_file_close(mZzipFile);
@@ -433,9 +531,15 @@ namespace Ogre {
         mCache.clear();
     }
     //-----------------------------------------------------------------------
-    //-----------------------------------------------------------------------
     //  ZipArchiveFactory
     //-----------------------------------------------------------------------
+    Archive *ZipArchiveFactory::createInstance( const String& name, bool readOnly )
+    {
+        if(!readOnly)
+            return NULL;
+
+        return OGRE_NEW ZipArchive(name, getType(), getDefaultIO());
+    }
     //-----------------------------------------------------------------------
     const String& ZipArchiveFactory::getType(void) const
     {
@@ -458,17 +562,16 @@ namespace Ogre {
     };
     //-----------------------------------------------------------------------
     /// A type for a map between the file names to file index
-    typedef map<String, int>::type FileNameToIndexMap;
+    typedef std::map<String, int> FileNameToIndexMap;
     typedef FileNameToIndexMap::iterator FileNameToIndexMapIter;
     /// A type to store the embedded files data
-    typedef vector<EmbeddedFileData>::type EmbbedFileDataList;
+    typedef std::vector<EmbeddedFileData> EmbbedFileDataList;
+
+    namespace {
     /// A static map between the file names to file index
     FileNameToIndexMap * EmbeddedZipArchiveFactory_mFileNameToIndexMap;
     /// A static list to store the embedded files data
     EmbbedFileDataList * EmbeddedZipArchiveFactory_mEmbbedFileDataList;
-    /// A static pointer to file io alternative implementation for the embedded files
-    zzip_plugin_io_handlers* EmbeddedZipArchiveFactory::mPluginIo = NULL;
-    _zzip_plugin_io sEmbeddedZipArchiveFactory_PluginIo;
     #define EMBED_IO_BAD_FILE_HANDLE (-1)
     #define EMBED_IO_SUCCESS (0)
     //-----------------------------------------------------------------------
@@ -628,27 +731,27 @@ namespace Ogre {
         // the files in this case are read only - return an error  - nonzero value.
         return -1;
     }
-    //-----------------------------------------------------------------------
-    EmbeddedZipArchiveFactory::EmbeddedZipArchiveFactory()
+
+    /// A static pointer to file io alternative implementation for the embedded files
+    const zzip_plugin_io_handlers* getEmbeddedZipIO()
     {
-        // init static member
-        if (mPluginIo == NULL)
-        {
-            mPluginIo = &sEmbeddedZipArchiveFactory_PluginIo;
-            mPluginIo->fd.open = EmbeddedZipArchiveFactory_open;    
-            mPluginIo->fd.close = EmbeddedZipArchiveFactory_close;    
-            mPluginIo->fd.read = EmbeddedZipArchiveFactory_read;    
-            mPluginIo->fd.seeks = EmbeddedZipArchiveFactory_seeks;    
-            mPluginIo->fd.filesize = EmbeddedZipArchiveFactory_filesize;    
-            mPluginIo->fd.write = EmbeddedZipArchiveFactory_write;    
-            mPluginIo->fd.sys = 1;    
-            mPluginIo->fd.type = 1;    
-        }
+        static zzip_plugin_io_handlers embeddedZipIO = {
+            {EmbeddedZipArchiveFactory_open, EmbeddedZipArchiveFactory_close,
+             EmbeddedZipArchiveFactory_read, EmbeddedZipArchiveFactory_seeks,
+             EmbeddedZipArchiveFactory_filesize, 1, 1, EmbeddedZipArchiveFactory_write}};
+        return &embeddedZipIO;
     }
+
+    } // namespace {
     //-----------------------------------------------------------------------
-    EmbeddedZipArchiveFactory::~EmbeddedZipArchiveFactory()
+    EmbeddedZipArchiveFactory::EmbeddedZipArchiveFactory() {}
+    EmbeddedZipArchiveFactory::~EmbeddedZipArchiveFactory() {}
+    //-----------------------------------------------------------------------
+    Archive *EmbeddedZipArchiveFactory::createInstance( const String& name, bool readOnly )
     {
-    }    
+        ZipArchive * resZipArchive = OGRE_NEW ZipArchive(name, getType(), getEmbeddedZipIO());
+        return resZipArchive;
+    }
     //-----------------------------------------------------------------------
     const String& EmbeddedZipArchiveFactory::getType(void) const
     {

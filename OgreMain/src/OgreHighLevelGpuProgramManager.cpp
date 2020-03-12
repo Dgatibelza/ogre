@@ -86,17 +86,12 @@ namespace Ogre {
         { 
             return sNullLang;
         }
-        HighLevelGpuProgram* create(ResourceManager* creator, 
+        GpuProgram* create(ResourceManager* creator,
             const String& name, ResourceHandle handle,
             const String& group, bool isManual, ManualResourceLoader* loader)
         {
             return OGRE_NEW NullProgram(creator, name, handle, group, isManual, loader);
         }
-        void destroy(HighLevelGpuProgram* prog)
-        {
-            OGRE_DELETE prog;
-        }
-
     };
     //-----------------------------------------------------------------------
     template<> HighLevelGpuProgramManager* 
@@ -119,16 +114,14 @@ namespace Ogre {
 
         ResourceGroupManager::getSingleton()._registerResourceManager(mResourceType, this);    
 
-        mNullFactory = OGRE_NEW NullProgramFactory();
-        addFactory(mNullFactory);
-        mUnifiedFactory = OGRE_NEW UnifiedHighLevelGpuProgramFactory();
-        addFactory(mUnifiedFactory);
+        mNullFactory.reset(new NullProgramFactory());
+        addFactory(mNullFactory.get());
+        mUnifiedFactory.reset(new UnifiedHighLevelGpuProgramFactory());
+        addFactory(mUnifiedFactory.get());
     }
     //-----------------------------------------------------------------------
     HighLevelGpuProgramManager::~HighLevelGpuProgramManager()
     {
-        OGRE_DELETE mUnifiedFactory;
-        OGRE_DELETE mNullFactory;
         ResourceGroupManager::getSingleton()._unregisterResourceManager(mResourceType);    
     }
     //---------------------------------------------------------------------------
@@ -195,18 +188,16 @@ namespace Ogre {
             const String& name, const String& groupName, 
             const String& language, GpuProgramType gptype)
     {
-        ResourcePtr ret = ResourcePtr(
-            getFactory(language)->create(this, name, getNextHandle(), 
-            groupName, false, 0));
-
-        HighLevelGpuProgramPtr prg = static_pointer_cast<HighLevelGpuProgram>(ret);
+        GpuProgram* prg = getFactory(language)->create(this, name, getNextHandle(), groupName, false, 0);
         prg->setType(gptype);
         prg->setSyntaxCode(language);
 
+        ResourcePtr ret(prg);
         addImpl(ret);
         // Tell resource group manager
-        ResourceGroupManager::getSingleton()._notifyResourceCreated(ret);
-        return prg;
+        if(ret)
+            ResourceGroupManager::getSingleton()._notifyResourceCreated(ret);
+        return static_pointer_cast<HighLevelGpuProgram>(ret);
     }
     //---------------------------------------------------------------------------
     HighLevelGpuProgramFactory::~HighLevelGpuProgramFactory() 

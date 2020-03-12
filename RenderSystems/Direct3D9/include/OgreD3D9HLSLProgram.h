@@ -57,13 +57,6 @@ namespace Ogre {
             String doGet(const void* target) const;
             void doSet(void* target, const String& val);
         };
-        /// Command object for setting macro defines
-        class CmdPreprocessorDefines : public ParamCommand
-        {
-        public:
-            String doGet(const void* target) const;
-            void doSet(void* target, const String& val);
-        };
         /// Command object for setting matrix packing in column-major order
         class CmdColumnMajorMatrices : public ParamCommand
         {
@@ -107,16 +100,14 @@ namespace Ogre {
 
         static CmdEntryPoint msCmdEntryPoint;
         static CmdTarget msCmdTarget;
-        static CmdPreprocessorDefines msCmdPreprocessorDefines;
         static CmdColumnMajorMatrices msCmdColumnMajorMatrices;
         static CmdOptimisation msCmdOptimisation;
         static CmdMicrocode msCmdMicrocode;
         static CmdAssemblerCode msCmdAssemblerCode;
         static CmdBackwardsCompatibility msCmdBackwardsCompatibility;
 
-        /** Internal load implementation, must be implemented by subclasses.
-        */
-        void loadFromSource(void);
+        void prepareImpl();
+        void loadFromSource() {} // all done in prepare
         /** Internal method for creating an appropriate low-level program from this
         high-level program, must be implemented by subclasses. */
         void createLowLevelImpl(void);
@@ -162,10 +153,10 @@ namespace Ogre {
         OptimisationLevel mOptimisationLevel;
 
         /** Gets the microcode from the microcode cache. */
-        void getMicrocodeFromCache(void);
+        void getMicrocodeFromCache(uint32 id);
         /** Compiles the microcode from the program source. */
         void compileMicrocode(void);
-        void addMicrocodeToCache();
+        void addMicrocodeToCache(uint32 id);
     public:
         D3D9HLSLProgram(ResourceManager* creator, const String& name, ResourceHandle handle,
             const String& group, bool isManual, ManualResourceLoader* loader);

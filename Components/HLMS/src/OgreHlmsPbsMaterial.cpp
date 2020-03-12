@@ -320,8 +320,8 @@ namespace Ogre
 		unsigned int count = std::min(mDirectionalLightCount + mPointLightCount + mSpotLightCount, maxLightCount);
 		if (count)
 		{
-			Matrix4 viewMatrix = source->getViewMatrix();
-			Quaternion viewMatrixQuat = viewMatrix.extractQuaternion();
+		    Affine3 viewMatrix = source->getViewMatrix();
+			Quaternion viewMatrixQuat = Quaternion(viewMatrix.linear());
 
 			int directionalLightIndex = 0;
 			int pointLightLightIndex = 0;
@@ -400,7 +400,7 @@ namespace Ogre
 		}
 		else if (s.textureType == TEX_TYPE_CUBE_MAP)
 		{
-			s.textureUnitState->setCubicTexture(&s.tex, true);
+			s.textureUnitState->setTexture(s.tex);
 			if (mFragmentDatablock.getLanguage() != "hlsl")
 			{
 				s.textureUnitState->setTextureAddressingMode(TextureUnitState::TAM_CLAMP);
@@ -465,6 +465,7 @@ namespace Ogre
 		s.blendFunc = blendFunc;
 		s.blendFactor1 = blendFactor1;
 		s.blendFactor2 = blendFactor2;
+		s.hasBlendFactor1 = s.hasBlendFactor2 = true;
 
 		s.intensity = intensityFactor;
 		s.mipmapCount = !tex ? 0.0f : tex->getNumMipmaps();

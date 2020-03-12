@@ -89,10 +89,10 @@ TEST_F(PixelFormatTests,FloatPackUnpack)
 }
 //--------------------------------------------------------------------------
 // Pure 32 bit float precision brute force pixel conversion; for comparison
-void naiveBulkPixelConversion(const PixelBox &src, const PixelBox &dst)
+static void naiveBulkPixelConversion(const PixelBox &src, const PixelBox &dst)
 {
-    uint8 *srcptr = static_cast<uint8*>(src.data);
-    uint8 *dstptr = static_cast<uint8*>(dst.data);
+    uint8 *srcptr = src.data;
+    uint8 *dstptr = dst.data;
     size_t srcPixelSize = PixelUtil::getNumElemBytes(src.format);
     size_t dstPixelSize = PixelUtil::getNumElemBytes(dst.format);
 
@@ -191,6 +191,13 @@ TEST_F(PixelFormatTests,BulkConversion)
     testCase(PF_R8G8B8A8,PF_A8R8G8B8);
     testCase(PF_R8G8B8A8,PF_A8B8G8R8);
     testCase(PF_R8G8B8A8,PF_B8G8R8A8);
+
+    testCase(PF_A8B8G8R8, PF_R8);
+    testCase(PF_R8, PF_A8B8G8R8);
+    testCase(PF_A8R8G8B8, PF_R8);
+    testCase(PF_R8, PF_A8R8G8B8);
+    testCase(PF_B8G8R8A8, PF_R8);
+    testCase(PF_R8, PF_B8G8R8A8);
 
     testCase(PF_A8B8G8R8, PF_L8);
     testCase(PF_L8, PF_A8B8G8R8);

@@ -26,15 +26,9 @@ THE SOFTWARE.
 -----------------------------------------------------------------------------
 */
 #include "OgreStableHeaders.h"
-#include "OgreCamera.h"
 
-#include "OgreSceneManager.h"
-#include "OgreProfiler.h"
-#include "OgreMatrix4.h"
-#include "OgreRay.h"
 #include "OgreViewport.h"
 #include "OgreMovablePlane.h"
-#include "OgreSceneNode.h"
 
 namespace Ogre {
 
@@ -42,21 +36,23 @@ namespace Ogre {
     //-----------------------------------------------------------------------
     Camera::Camera( const String& name, SceneManager* sm)
         : Frustum(name),
+        mWindowSet(false),
+        mAutoAspectRatio(false),
+        mUseRenderingDistance(true),
+        mUseMinPixelSize(false),
         mSceneMgr(sm),
+        mSceneDetail(PM_SOLID),
+#ifdef OGRE_NODELESS_POSITIONING
         mOrientation(Quaternion::IDENTITY),
         mPosition(Vector3::ZERO),
-        mSceneDetail(PM_SOLID),
         mAutoTrackTarget(0),
         mAutoTrackOffset(Vector3::ZERO),
+#endif
         mSceneLodFactor(1.0f),
         mSceneLodFactorInv(1.0f),
-        mWindowSet(false),
         mLastViewport(0),
-        mAutoAspectRatio(false),
         mCullFrustum(0),
-        mUseRenderingDistance(true),
         mLodCamera(0),
-        mUseMinPixelSize(false),
         mPixelDisplayRatio(0)
     {
 
@@ -67,14 +63,16 @@ namespace Ogre {
         mAspect = 1.33333333333333f;
         mProjType = PT_PERSPECTIVE;
 
+#ifdef OGRE_NODELESS_POSITIONING
         mYawFixed = true; // Default to fixed yaw, like freelook since most people expect this
         mYawFixedAxis = Vector3::UNIT_Y;
+#endif
 
         invalidateFrustum();
         invalidateView();
 
         // Init matrices
-        mViewMatrix = Matrix4::ZERO;
+        mViewMatrix = Affine3::ZERO;
         mProjMatrixRS = Matrix4::ZERO;
 
         mParentNode = 0;
@@ -113,7 +111,7 @@ namespace Ogre {
     {
         return mSceneDetail;
     }
-
+#ifdef OGRE_NODELESS_POSITIONING
     //-----------------------------------------------------------------------
     void Camera::setPosition(Real x, Real y, Real z)
     {
@@ -174,16 +172,9 @@ namespace Ogre {
 
         Quaternion targetWorldOrientation;
 
-
         if( mYawFixed )
         {
-            Vector3 xVec = mYawFixedAxis.crossProduct( zAdjustVec );
-            xVec.normalise();
-
-            Vector3 yVec = zAdjustVec.crossProduct( xVec );
-            yVec.normalise();
-
-            targetWorldOrientation.FromAxes( xVec, yVec, zAdjustVec );
+            targetWorldOrientation = Math::lookRotation(zAdjustVec, mYawFixedAxis);
         }
         else
         {
@@ -324,8 +315,64 @@ namespace Ogre {
     }
 
     //-----------------------------------------------------------------------
+    void Camera::setFixedYawAxis(bool useFixed, const Vector3& fixedAxis)
+    {
+        mYawFixed = useFixed;
+        mYawFixedAxis = fixedAxis;
+    }
+    //-----------------------------------------------------------------------
+    const Quaternion& Camera::getOrientation(void) const
+    {
+        return mOrientation;
+    }
+    //-----------------------------------------------------------------------
+    void Camera::_autoTrack(void)
+    {
+        // NB assumes that all scene nodes have been updated
+        if (mAutoTrackTarget)
+        {
+            lookAt(mAutoTrackTarget->_getFullTransform() * mAutoTrackOffset);
+        }
+    }
+
+    //-----------------------------------------------------------------------
+    void Camera::setOrientation(const Quaternion& q)
+    {
+        mOrientation = q;
+        mOrientation.normalise();
+        invalidateView();
+    }
+    //-----------------------------------------------------------------------
+    void Camera::setAutoTracking(bool enabled, SceneNode* const target,
+        const Vector3& offset)
+    {
+        if (enabled)
+        {
+            assert (target != 0 && "target cannot be a null pointer if tracking is enabled");
+            mAutoTrackTarget = target;
+            mAutoTrackOffset = offset;
+        }
+        else
+        {
+            mAutoTrackTarget = 0;
+        }
+    }
+    //-----------------------------------------------------------------------
+    const Vector3& Camera::getPositionForViewUpdate(void) const
+    {
+        // Note no update, because we're calling this from the update!
+        return mRealPosition;
+    }
+    //-----------------------------------------------------------------------
+    const Quaternion& Camera::getOrientationForViewUpdate(void) const
+    {
+        return mRealOrientation;
+    }
+#endif
+    //-----------------------------------------------------------------------
     bool Camera::isViewOutOfDate(void) const
     {
+#ifdef OGRE_NODELESS_POSITIONING
         // Overridden from Frustum to use local orientation / position offsets
         // Attached to node?
         if (mParentNode != 0)
@@ -360,20 +407,29 @@ namespace Ogre {
             mRecalcView = true;
             mRecalcWindow = true;
         }
+#else
+        if(Frustum::isViewOutOfDate())
+            mRecalcWindow = true;
+#endif
 
         // Deriving reflected orientation / position
         if (mRecalcView)
         {
+#ifndef OGRE_NODELESS_POSITIONING
+            const auto& mRealOrientation = mLastParentOrientation;
+            const auto& mRealPosition = mLastParentPosition;
+#endif
+
             if (mReflect)
             {
                 // Calculate reflected orientation, use up-vector as fallback axis.
-                Vector3 dir = mRealOrientation * Vector3::NEGATIVE_UNIT_Z;
+                Vector3 dir = -mRealOrientation.zAxis();
                 Vector3 rdir = dir.reflect(mReflectPlane.normal);
-                Vector3 up = mRealOrientation * Vector3::UNIT_Y;
+                Vector3 up = mRealOrientation.yAxis();
                 mDerivedOrientation = dir.getRotationTo(rdir, up) * mRealOrientation;
 
                 // Calculate reflected position.
-                mDerivedPosition = mReflectMatrix.transformAffine(mRealPosition);
+                mDerivedPosition = mReflectMatrix * mRealPosition;
             }
             else
             {
@@ -401,7 +457,7 @@ namespace Ogre {
     //-----------------------------------------------------------------------
     void Camera::_renderScene(Viewport *vp, bool includeOverlays)
     {
-        OgreProfileBeginGPUEvent("Camera: " + getName());
+        OgreProfileBeginGPUEvent(getName());
 
         //update the pixel display ratio
         if (mProjType == Ogre::PT_PERSPECTIVE)
@@ -410,7 +466,7 @@ namespace Ogre {
         }
         else
         {
-            mPixelDisplayRatio = (mTop - mBottom) / vp->getActualHeight();
+            mPixelDisplayRatio = -mExtents.height() / vp->getActualHeight();
         }
 
         //notify prerender scene
@@ -431,7 +487,7 @@ namespace Ogre {
         {
             (*i)->cameraPostRenderScene(this);
         }
-        OgreProfileEndGPUEvent("Camera: " + getName());
+        OgreProfileEndGPUEvent(getName());
     }
     //---------------------------------------------------------------------
     void Camera::addListener(Listener* l)
@@ -449,9 +505,13 @@ namespace Ogre {
     //-----------------------------------------------------------------------
     std::ostream& operator<<( std::ostream& o, const Camera& c )
     {
-        o << "Camera(Name='" << c.mName << "', pos=" << c.mPosition;
-        Vector3 dir(c.mOrientation*Vector3(0,0,-1));
-        o << ", direction=" << dir << ",near=" << c.mNearDist;
+        o << "Camera(Name='" << c.mName << "'";
+#ifdef OGRE_NODELESS_POSITIONING
+        o << ", pos=" << c.mPosition << ", direction=" << -c.mOrientation.zAxis();
+#else
+        o << ", pos=" << c.mLastParentPosition << ", direction=" << -c.mLastParentOrientation.zAxis();
+#endif
+        o << ",near=" << c.mNearDist;
         o << ", far=" << c.mFarDist << ", FOVy=" << c.mFOVy.valueDegrees();
         o << ", aspect=" << c.mAspect << ", ";
         o << ", xoffset=" << c.mFrustumOffset.x << ", yoffset=" << c.mFrustumOffset.y;
@@ -466,14 +526,6 @@ namespace Ogre {
 
         return o;
     }
-
-    //-----------------------------------------------------------------------
-    void Camera::setFixedYawAxis(bool useFixed, const Vector3& fixedAxis)
-    {
-        mYawFixed = useFixed;
-        mYawFixedAxis = fixedAxis;
-    }
-
     //-----------------------------------------------------------------------
     void Camera::_notifyRenderedFaces(unsigned int numfaces)
     {
@@ -497,19 +549,6 @@ namespace Ogre {
         return mVisBatchesLastRender;
     }
     //-----------------------------------------------------------------------
-    const Quaternion& Camera::getOrientation(void) const
-    {
-        return mOrientation;
-    }
-
-    //-----------------------------------------------------------------------
-    void Camera::setOrientation(const Quaternion& q)
-    {
-        mOrientation = q;
-        mOrientation.normalise();
-        invalidateView();
-    }
-    //-----------------------------------------------------------------------
     const Quaternion& Camera::getDerivedOrientation(void) const
     {
         updateView();
@@ -526,50 +565,70 @@ namespace Ogre {
     {
         // Direction points down -Z
         updateView();
-        return mDerivedOrientation * Vector3::NEGATIVE_UNIT_Z;
+        return -mDerivedOrientation.zAxis();
     }
     //-----------------------------------------------------------------------
     Vector3 Camera::getDerivedUp(void) const
     {
         updateView();
-        return mDerivedOrientation * Vector3::UNIT_Y;
+        return mDerivedOrientation.yAxis();
     }
     //-----------------------------------------------------------------------
     Vector3 Camera::getDerivedRight(void) const
     {
         updateView();
-        return mDerivedOrientation * Vector3::UNIT_X;
+        return mDerivedOrientation.xAxis();
     }
     //-----------------------------------------------------------------------
     const Quaternion& Camera::getRealOrientation(void) const
     {
         updateView();
+#ifdef OGRE_NODELESS_POSITIONING
         return mRealOrientation;
+#else
+        return mLastParentOrientation;
+#endif
     }
     //-----------------------------------------------------------------------
     const Vector3& Camera::getRealPosition(void) const
     {
         updateView();
+#ifdef OGRE_NODELESS_POSITIONING
         return mRealPosition;
+#else
+        return mLastParentPosition;
+#endif
     }
     //-----------------------------------------------------------------------
     Vector3 Camera::getRealDirection(void) const
     {
         // Direction points down -Z
         updateView();
+#ifdef OGRE_NODELESS_POSITIONING
         return mRealOrientation * Vector3::NEGATIVE_UNIT_Z;
+#else
+        return -mLastParentOrientation.zAxis();
+#endif
     }
     //-----------------------------------------------------------------------
     Vector3 Camera::getRealUp(void) const
     {
         updateView();
+#ifdef OGRE_NODELESS_POSITIONING
         return mRealOrientation * Vector3::UNIT_Y;
+#else
+        return mLastParentOrientation.yAxis();
+#endif
     }
     //-----------------------------------------------------------------------
     Vector3 Camera::getRealRight(void) const
     {
         updateView();
+#ifdef OGRE_NODELESS_POSITIONING
         return mRealOrientation * Vector3::UNIT_X;
+#else
+        return mLastParentOrientation.xAxis();
+#endif
     }
     //-----------------------------------------------------------------------
     void Camera::getWorldTransforms(Matrix4* mat) const 
@@ -589,30 +648,6 @@ namespace Ogre {
     const String& Camera::getMovableType(void) const
     {
         return msMovableType;
-    }
-    //-----------------------------------------------------------------------
-    void Camera::setAutoTracking(bool enabled, SceneNode* const target, 
-        const Vector3& offset)
-    {
-        if (enabled)
-        {
-            assert (target != 0 && "target cannot be a null pointer if tracking is enabled");
-            mAutoTrackTarget = target;
-            mAutoTrackOffset = offset;
-        }
-        else
-        {
-            mAutoTrackTarget = 0;
-        }
-    }
-    //-----------------------------------------------------------------------
-    void Camera::_autoTrack(void)
-    {
-        // NB assumes that all scene nodes have been updated
-        if (mAutoTrackTarget)
-        {
-            lookAt(mAutoTrackTarget->_getFullTransform().transformAffine(mAutoTrackOffset));
-        }
     }
     //-----------------------------------------------------------------------
     void Camera::setLodBias(Real factor)
@@ -783,28 +818,27 @@ namespace Ogre {
             return;
 
         // Calculate general projection parameters
-        Real vpLeft, vpRight, vpBottom, vpTop;
-        calcProjectionParameters(vpLeft, vpRight, vpBottom, vpTop);
+        RealRect vp = calcProjectionParameters();
 
-        Real vpWidth = vpRight - vpLeft;
-        Real vpHeight = vpTop - vpBottom;
+        Real vpWidth = vp.width();
+        Real vpHeight = -vp.height();
 
-        Real wvpLeft   = vpLeft + mWLeft * vpWidth;
-        Real wvpRight  = vpLeft + mWRight * vpWidth;
-        Real wvpTop    = vpTop - mWTop * vpHeight;
-        Real wvpBottom = vpTop - mWBottom * vpHeight;
+        Real wvpLeft   = vp.left + mWLeft * vpWidth;
+        Real wvpRight  = vp.left + mWRight * vpWidth;
+        Real wvpTop    = vp.top - mWTop * vpHeight;
+        Real wvpBottom = vp.top - mWBottom * vpHeight;
 
         Vector3 vp_ul (wvpLeft, wvpTop, -mNearDist);
         Vector3 vp_ur (wvpRight, wvpTop, -mNearDist);
         Vector3 vp_bl (wvpLeft, wvpBottom, -mNearDist);
         Vector3 vp_br (wvpRight, wvpBottom, -mNearDist);
 
-        Matrix4 inv = mViewMatrix.inverseAffine();
+        Affine3 inv = mViewMatrix.inverse();
 
-        Vector3 vw_ul = inv.transformAffine(vp_ul);
-        Vector3 vw_ur = inv.transformAffine(vp_ur);
-        Vector3 vw_bl = inv.transformAffine(vp_bl);
-        Vector3 vw_br = inv.transformAffine(vp_br);
+        Vector3 vw_ul = inv * vp_ul;
+        Vector3 vw_ur = inv * vp_ur;
+        Vector3 vw_bl = inv * vp_bl;
+        Vector3 vw_br = inv * vp_br;
 
         mWindowClipPlanes.clear();
         if (mProjType == PT_PERSPECTIVE)
@@ -831,7 +865,7 @@ namespace Ogre {
 
     }
     // -------------------------------------------------------------------
-    const vector<Plane>::type& Camera::getWindowPlanes(void) const
+    const std::vector<Plane>& Camera::getWindowPlanes(void) const
     {
         updateView();
         setWindowImpl();
@@ -844,17 +878,6 @@ namespace Ogre {
         // just to keep things just outside
         return mNearDist * 1.5f;
 
-    }
-    //-----------------------------------------------------------------------
-    const Vector3& Camera::getPositionForViewUpdate(void) const
-    {
-        // Note no update, because we're calling this from the update!
-        return mRealPosition;
-    }
-    //-----------------------------------------------------------------------
-    const Quaternion& Camera::getOrientationForViewUpdate(void) const
-    {
-        return mRealOrientation;
     }
     //-----------------------------------------------------------------------
     bool Camera::getAutoAspectRatio(void) const
@@ -903,7 +926,7 @@ namespace Ogre {
         }
     }
     //-----------------------------------------------------------------------
-    const Vector3* Camera::getWorldSpaceCorners(void) const
+    const Frustum::Corners& Camera::getWorldSpaceCorners(void) const
     {
         if (mCullFrustum)
         {
@@ -964,7 +987,7 @@ namespace Ogre {
         }
     }
     //-----------------------------------------------------------------------
-    const Matrix4& Camera::getViewMatrix(void) const
+    const Affine3& Camera::getViewMatrix(void) const
     {
         if (mCullFrustum)
         {
@@ -976,7 +999,7 @@ namespace Ogre {
         }
     }
     //-----------------------------------------------------------------------
-    const Matrix4& Camera::getViewMatrix(bool ownFrustumOnly) const
+    const Affine3& Camera::getViewMatrix(bool ownFrustumOnly) const
     {
         if (ownFrustumOnly)
         {
@@ -999,9 +1022,9 @@ namespace Ogre {
     //| coordinate system in which this is true.            |
     //|_____________________________________________________|
     //
-    vector<Vector4>::type Camera::getRayForwardIntersect(const Vector3& anchor, const Vector3 *dir, Real planeOffset) const
+    std::vector<Vector4> Camera::getRayForwardIntersect(const Vector3& anchor, const Vector3 *dir, Real planeOffset) const
     {
-        vector<Vector4>::type res;
+        std::vector<Vector4> res;
 
         if(!dir)
             return res;
@@ -1082,7 +1105,7 @@ namespace Ogre {
     //| line at infinity.                                   |
     //|_____________________________________________________|
     //
-    void Camera::forwardIntersect(const Plane& worldPlane, vector<Vector4>::type* intersect3d) const
+    void Camera::forwardIntersect(const Plane& worldPlane, std::vector<Vector4>* intersect3d) const
     {
         if(!intersect3d)
             return;
@@ -1110,7 +1133,7 @@ namespace Ogre {
         vec[3] = invPlaneRot * brCorner - lPos; 
 
         // compute intersection points on plane
-        vector<Vector4>::type iPnt = getRayForwardIntersect(lPos, vec, -pval.d);
+        std::vector<Vector4> iPnt = getRayForwardIntersect(lPos, vec, -pval.d);
 
 
         // return wanted data
@@ -1128,9 +1151,11 @@ namespace Ogre {
     //-----------------------------------------------------------------------
     void Camera::synchroniseBaseSettingsWith(const Camera* cam)
     {
-        mPosition = cam->mPosition;
         this->setProjectionType(cam->getProjectionType());
+#ifdef OGRE_NODELESS_POSITIONING
+        mPosition = cam->mPosition;
         mOrientation = cam->mOrientation;
+#endif
         invalidateView();
         this->setAspectRatio(cam->getAspectRatio());
         this->setNearClipDistance(cam->getNearClipDistance());

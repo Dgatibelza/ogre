@@ -28,19 +28,13 @@ THE SOFTWARE.
 #include "OgreStableHeaders.h"
 
 #include "OgreParticleSystem.h"
-#include "OgreParticleSystemManager.h"
 #include "OgreParticleEmitter.h"
 #include "OgreParticleAffector.h"
 #include "OgreParticle.h"
 #include "OgreIteratorWrappers.h"
-#include "OgreCamera.h"
-#include "OgreStringConverter.h"
 #include "OgreParticleAffectorFactory.h"
 #include "OgreParticleSystemRenderer.h"
-#include "OgreMaterialManager.h"
-#include "OgreSceneManager.h"
 #include "OgreControllerManager.h"
-#include "OgreRoot.h"
 
 namespace Ogre {
     // Init statics
@@ -467,7 +461,7 @@ namespace Ogre {
                 {
                     // For now, it can only be an emitted emitter
                     pParticleEmitter = static_cast<ParticleEmitter*>(*i);
-                    list<ParticleEmitter*>::type* fee = findFreeEmittedEmitter(pParticleEmitter->getName());
+                    std::list<ParticleEmitter*>* fee = findFreeEmittedEmitter(pParticleEmitter->getName());
                     fee->push_back(pParticleEmitter);
 
                     // Also erase from mActiveEmittedEmitters
@@ -490,8 +484,8 @@ namespace Ogre {
     void ParticleSystem::_triggerEmitters(Real timeElapsed)
     {
         // Add up requests for emission
-        static vector<unsigned>::type requested;
-        static vector<unsigned>::type emittedRequested;
+        static std::vector<unsigned> requested;
+        static std::vector<unsigned> emittedRequested;
 
         if( requested.size() != mEmitters.size() )
             requested.resize( mEmitters.size() );
@@ -578,7 +572,7 @@ namespace Ogre {
             // The particle is a visual particle if the emit_emitter property of the emitter isn't set 
             Particle* p = 0;
             String  emitterName = emitter->getEmittedEmitter();
-            if (emitterName == BLANKSTRING)
+            if (emitterName.empty())
                 p = createParticle();
             else
                 p = createEmitterParticle(emitterName);
@@ -714,7 +708,7 @@ namespace Ogre {
     {
         // Get the appropriate list and retrieve an emitter 
         Particle* p = 0;
-        list<ParticleEmitter*>::type* fee = findFreeEmittedEmitter(emitterName);
+        std::list<ParticleEmitter*>* fee = findFreeEmittedEmitter(emitterName);
         if (fee && !fee->empty())
         {
             p = fee->front();
@@ -879,7 +873,7 @@ namespace Ogre {
                 // node transform, so reverse transform back since we're expected to 
                 // provide a local AABB
                 AxisAlignedBox newAABB(mWorldAABB);
-                newAABB.transformAffine(mParentNode->_getFullTransform().inverseAffine());
+                newAABB.transform(mParentNode->_getFullTransform().inverse());
 
                 // Merge calculated box with current AABB to preserve any user-set AABB
                 mAABB.merge(newAABB);
@@ -892,8 +886,8 @@ namespace Ogre {
     void ParticleSystem::fastForward(Real time, Real interval)
     {
         // First make sure all transforms are up to date
-
-        for (Real ftime = 0; ftime < time; ftime += interval)
+        size_t steps = size_t(time/interval + 0.5f); // integer round
+        for (size_t i = 0; i < steps; i++)
         {
             _update(interval);
         }
@@ -1306,7 +1300,7 @@ namespace Ogre {
         {
             // Determine the names of all emitters that are emitted
             ParticleEmitter* emitter = *emitterIterator ;
-            if (emitter && emitter->getEmittedEmitter() != BLANKSTRING)
+            if (emitter && !emitter->getEmittedEmitter().empty())
             {
                 // This one will be emitted, register its name and leave the vector empty!
                 EmittedEmitterList empty;
@@ -1319,7 +1313,7 @@ namespace Ogre {
                 emitterInner = *emitterIteratorInner;
                 if (emitter && 
                     emitterInner && 
-                    emitter->getName() != BLANKSTRING && 
+                    !emitter->getName().empty() &&
                     emitter->getName() == emitterInner->getEmittedEmitter())
                 {
                     emitter->setEmitted(true);
@@ -1395,7 +1389,7 @@ namespace Ogre {
         EmittedEmitterPool::iterator emittedEmitterPoolIterator;
         EmittedEmitterList::iterator emittedEmitterIterator;
         EmittedEmitterList* emittedEmitters = 0;
-        list<ParticleEmitter*>::type* fee = 0;
+        std::list<ParticleEmitter*>* fee = 0;
         String name = BLANKSTRING;
 
         // Run through the emittedEmitterPool map
@@ -1446,7 +1440,7 @@ namespace Ogre {
         mActiveEmittedEmitters.clear();
     }
     //-----------------------------------------------------------------------
-    list<ParticleEmitter*>::type* ParticleSystem::findFreeEmittedEmitter (const String& name)
+    std::list<ParticleEmitter*>* ParticleSystem::findFreeEmittedEmitter (const String& name)
     {
         FreeEmittedEmitterMap::iterator it;
         it = mFreeEmittedEmitters.find (name);
@@ -1478,7 +1472,7 @@ namespace Ogre {
         ActiveEmittedEmitterList::iterator itActiveEmit;
         for (itActiveEmit = mActiveEmittedEmitters.begin(); itActiveEmit != mActiveEmittedEmitters.end(); ++itActiveEmit)
         {
-            list<ParticleEmitter*>::type* fee = findFreeEmittedEmitter ((*itActiveEmit)->getName());
+            std::list<ParticleEmitter*>* fee = findFreeEmittedEmitter ((*itActiveEmit)->getName());
             if (fee)
                 fee->push_back(*itActiveEmit);
         }
@@ -1614,7 +1608,7 @@ namespace Ogre {
     ParticleAffectorFactory::~ParticleAffectorFactory() 
     {
         // Destroy all affectors
-        vector<ParticleAffector*>::type::iterator i;
+        std::vector<ParticleAffector*>::iterator i;
         for (i = mAffectors.begin(); i != mAffectors.end(); ++i)
         {
             OGRE_DELETE (*i);
@@ -1626,7 +1620,7 @@ namespace Ogre {
     //-----------------------------------------------------------------------
     void ParticleAffectorFactory::destroyAffector(ParticleAffector* e)
     {
-        vector<ParticleAffector*>::type::iterator i;
+        std::vector<ParticleAffector*>::iterator i;
         for (i = mAffectors.begin(); i != mAffectors.end(); ++i)
         {
             if ((*i) == e)

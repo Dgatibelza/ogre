@@ -1,10 +1,11 @@
 # Setting up an OGRE project {#setup}
-@note see BuildingOgre.md for instructions how to build OGRE itself
+@note see @ref building-ogre for instructions how to build OGRE itself
 # CMake Configuration {#cmake}
 Ogre uses CMake as its build system. It is recommended that you use it in your project as well.  
-Then all you need is to add the following three lines to your project
-@snippet Samples/Bootstrap/CMakeLists.txt discover_ogre
-These settings include all available components and third party libraries OGRE depends on (e.g. boost) - nothing more to do.
+Then all you need is to add the following lines to your project
+@snippet Samples/Tutorials/CMakeLists.txt discover_ogre
+These settings already include any third party libraries the Components depends on (e.g. SDL) - nothing more to do.
+Alternatively use `${OGRE_LIBRARIES}` to link against all available OGRE components.
 
 If you installed OGRE in a non-standard path, you will have to set `OGRE_DIR` to the location of `OGREConfig.cmake` so `find_package` can figure out the rest.
 
@@ -29,21 +30,32 @@ class MyTestApp : public OgreBites::ApplicationContext, public OgreBites::InputL
     ...
 }
 ```
-in the constructor we register ourself as a InputListener
-@snippet Samples/Bootstrap/main.cpp constructor
+in the constructor we set our application name. The ogre configuration files will be stored in a system dependant location specific to our app.
+@snippet Samples/Tutorials/Bootstrap.cpp constructor
 
 to handle input events, we then override the according method
-@snippet Samples/Bootstrap/main.cpp key_handler
+@snippet Samples/Tutorials/Bootstrap.cpp key_handler
 
 the interesting part however is the setup method
-@snippet Samples/Bootstrap/main.cpp setup
+@snippet Samples/Tutorials/Bootstrap.cpp setup
+@note The above code is explained in detail in @ref tut_FirstScene.
 
 finally we start everything as
-@snippet Samples/Bootstrap/main.cpp main
-@note you can find the full code in `Samples/Bootstrap`.
+@snippet Samples/Tutorials/Bootstrap.cpp main
+@note You can find the full code of the above example at 
+* `Samples/Tutorials/Bootstrap.cpp` for C++
+* `Samples/Python/bites_sample.py` for Python
+* `Samples/AndroidJNI/MainActivity.java` for Java (Android)
 
 OgreBites itself is also a good starting point if you need more control over the Camera or the Window creation.
 For instance to render into an existing Qt Window.
 
+@see Ogre::FileSystemLayer::getConfigFilePath
+@see Ogre::Root::renderOneFrame
 @see Ogre::RenderSystem::_createRenderWindow
 @see Ogre::RenderSystem::preExtraThreadsStarted
+
+# Running your App
+
+On Linux you will typically install OGRE into `/usr/local/` which is automatically searched by the linker, so nothing more to do.
+On Windows however, you will have to either add the `sdk/bin` folder to `PATH` or copy your executable into `sdk/bin`.

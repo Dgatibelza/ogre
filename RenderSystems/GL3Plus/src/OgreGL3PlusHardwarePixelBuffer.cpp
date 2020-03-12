@@ -35,9 +35,8 @@
 #include "OgreGL3PlusRenderSystem.h"
 
 #include "OgreRoot.h"
-#include "OgreGLSLMonolithicProgramManager.h"
+#include "OgreGLSLProgramManager.h"
 #include "OgreGLSLMonolithicProgram.h"
-#include "OgreGLSLSeparableProgramManager.h"
 #include "OgreGLSLSeparableProgram.h"
 
 namespace Ogre {
@@ -61,9 +60,7 @@ namespace Ogre {
 
         PixelBox scaled;
 
-        if (src.getWidth() != dstBox.getWidth() ||
-            src.getHeight() != dstBox.getHeight() ||
-            src.getDepth() != dstBox.getDepth())
+        if (src.getSize() != dstBox.getSize())
         {
             // Scale to destination size.
             // This also does pixel format conversion if needed.
@@ -71,7 +68,7 @@ namespace Ogre {
             scaled = mBuffer.getSubVolume(dstBox);
             Image::scale(src, scaled, Image::FILTER_BILINEAR);
         }
-        else if (GL3PlusPixelUtil::getGLOriginFormat(src.format) == 0)
+        else if (GL3PlusPixelUtil::getGLInternalFormat(src.format) == 0)
         {
             // Extents match, but format is not accepted as valid
             // source format for GL. Do conversion in temporary buffer.
@@ -81,7 +78,6 @@ namespace Ogre {
         }
         else
         {
-            allocateBuffer();
             // No scaling or conversion needed.
             scaled = src;
         }
@@ -99,13 +95,10 @@ namespace Ogre {
                         "GL3PlusHardwarePixelBuffer::blitToMemory");
         }
 
-        if (srcBox.left == 0 && srcBox.right == getWidth() &&
-            srcBox.top == 0 && srcBox.bottom == getHeight() &&
-            srcBox.front == 0 && srcBox.back == getDepth() &&
-            dst.getWidth() == getWidth() &&
-            dst.getHeight() == getHeight() &&
-            dst.getDepth() == getDepth() &&
-            GL3PlusPixelUtil::getGLOriginFormat(dst.format) != 0)
+        if (srcBox.getOrigin() == Vector3i(0, 0 ,0) &&
+            srcBox.getSize() == getSize() &&
+            dst.getSize() == getSize() &&
+            GL3PlusPixelUtil::getGLInternalFormat(dst.format) != 0)
         {
             // The direct case: the user wants the entire texture in a format supported by GL
             // so we don't need an intermediate buffer
@@ -117,9 +110,7 @@ namespace Ogre {
             allocateBuffer();
             // Download entire buffer
             download(mBuffer);
-            if(srcBox.getWidth() != dst.getWidth() ||
-               srcBox.getHeight() != dst.getHeight() ||
-               srcBox.getDepth() != dst.getDepth())
+            if(srcBox.getSize() != dst.getSize())
             {
                 // We need scaling
                 Image::scale(mBuffer.getSubVolume(srcBox), dst, Image::FILTER_BILINEAR);

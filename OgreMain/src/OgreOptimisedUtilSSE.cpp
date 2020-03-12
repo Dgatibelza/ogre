@@ -26,13 +26,10 @@ THE SOFTWARE.
 -----------------------------------------------------------------------------
 */
 #include "OgreStableHeaders.h"
-
 #include "OgreOptimisedUtil.h"
-#include "OgrePlatformInformation.h"
 
-#if __OGRE_HAVE_SSE
 
-#include "OgreMatrix4.h"
+#if __OGRE_HAVE_SSE || __OGRE_HAVE_NEON
 
 // Should keep this includes at latest to avoid potential "xmmintrin.h" included by
 // other header file on some platform for some reason.
@@ -88,7 +85,7 @@ namespace Ogre {
             const float *srcPosPtr, float *destPosPtr,
             const float *srcNormPtr, float *destNormPtr,
             const float *blendWeightPtr, const unsigned char* blendIndexPtr,
-            const Matrix4* const* blendMatrices,
+            const Affine3* const* blendMatrices,
             size_t srcPosStride, size_t destPosStride,
             size_t srcNormStride, size_t destNormStride,
             size_t blendWeightStride, size_t blendIndexStride,
@@ -106,9 +103,9 @@ namespace Ogre {
 
         /// @copydoc OptimisedUtil::concatenateAffineMatrices
         virtual void __OGRE_SIMD_ALIGN_ATTRIBUTE concatenateAffineMatrices(
-            const Matrix4& baseMatrix,
-            const Matrix4* srcMatrices,
-            Matrix4* dstMatrices,
+            const Affine3& baseMatrix,
+            const Affine3* srcMatrices,
+            Affine3* dstMatrices,
             size_t numMatrices);
 
         /// @copydoc OptimisedUtil::calculateFaceNormals
@@ -165,7 +162,7 @@ namespace Ogre {
             const float *srcPosPtr, float *destPosPtr,
             const float *srcNormPtr, float *destNormPtr,
             const float *blendWeightPtr, const unsigned char* blendIndexPtr,
-            const Matrix4* const* blendMatrices,
+            const Affine3* const* blendMatrices,
             size_t srcPosStride, size_t destPosStride,
             size_t srcNormStride, size_t destNormStride,
             size_t blendWeightStride, size_t blendIndexStride,
@@ -208,9 +205,9 @@ namespace Ogre {
 
         /// @copydoc OptimisedUtil::concatenateAffineMatrices
         virtual void concatenateAffineMatrices(
-            const Matrix4& baseMatrix,
-            const Matrix4* srcMatrices,
-            Matrix4* dstMatrices,
+            const Affine3& baseMatrix,
+            const Affine3* srcMatrices,
+            Affine3* dstMatrices,
             size_t numMatrices)
         {
             __OGRE_SIMD_ALIGN_STACK();
@@ -391,7 +388,7 @@ namespace Ogre {
     {                                                                           \
         /* Important Note: If reuse pMatrixXXX frequently, M$ VC7.1 will */     \
         /* generate wrong code here!!!                                   */     \
-        const Matrix4* pMatrix0, *pMatrix1, *pMatrix2, *pMatrix3;               \
+        const Affine3* pMatrix0, *pMatrix1, *pMatrix2, *pMatrix3;               \
         __m128 weight, weights;                                                 \
                                                                                 \
         switch (numWeightsPerVertex)                                            \
@@ -445,7 +442,7 @@ namespace Ogre {
     {                                                                           \
         /* Important Note: If reuse pMatrixXXX frequently, M$ VC7.1 will */     \
         /* generate wrong code here!!!                                   */     \
-        const Matrix4* pMatrix0, *pMatrix1, *pMatrix2, *pMatrix3;               \
+        const Affine3* pMatrix0, *pMatrix1, *pMatrix2, *pMatrix3;               \
         __m128 weight, weights;                                                 \
                                                                                 \
         switch (numWeightsPerVertex)                                            \
@@ -520,7 +517,7 @@ namespace Ogre {
         const float *pSrcPos, float *pDestPos,
         const float *pSrcNorm, float *pDestNorm,
         const float *pBlendWeight, const unsigned char* pBlendIndex,
-        const Matrix4* const* blendMatrices,
+        const Affine3* const* blendMatrices,
         size_t srcPosStride, size_t destPosStride,
         size_t srcNormStride, size_t destNormStride,
         size_t blendWeightStride, size_t blendIndexStride,
@@ -612,7 +609,7 @@ namespace Ogre {
         static void apply(
             const float* pSrc, float* pDest,
             const float* pBlendWeight, const unsigned char* pBlendIndex,
-            const Matrix4* const* blendMatrices,
+            const Affine3* const* blendMatrices,
             size_t blendWeightStride, size_t blendIndexStride,
             size_t numWeightsPerVertex,
             size_t numIterations)
@@ -733,7 +730,7 @@ namespace Ogre {
     static OGRE_FORCE_INLINE void softwareVertexSkinning_SSE_PosNorm_Shared_Packed(
             const float* pSrcPos, float* pDestPos,
             const float* pBlendWeight, const unsigned char* pBlendIndex,
-            const Matrix4* const* blendMatrices,
+            const Affine3* const* blendMatrices,
             size_t blendWeightStride, size_t blendIndexStride,
             size_t numWeightsPerVertex,
             size_t numIterations)
@@ -772,7 +769,7 @@ namespace Ogre {
             const float* pSrcPos, float* pDestPos,
             const float* pSrcNorm, float* pDestNorm,
             const float* pBlendWeight, const unsigned char* pBlendIndex,
-            const Matrix4* const* blendMatrices,
+            const Affine3* const* blendMatrices,
             size_t blendWeightStride, size_t blendIndexStride,
             size_t numWeightsPerVertex,
             size_t numIterations)
@@ -889,7 +886,7 @@ namespace Ogre {
         const float* pSrcPos, float* pDestPos,
         const float* pSrcNorm, float* pDestNorm,
         const float* pBlendWeight, const unsigned char* pBlendIndex,
-        const Matrix4* const* blendMatrices,
+        const Affine3* const* blendMatrices,
         size_t blendWeightStride, size_t blendIndexStride,
         size_t numWeightsPerVertex,
         size_t numIterations)
@@ -929,7 +926,7 @@ namespace Ogre {
         static void apply(
             const float* pSrcPos, float* pDestPos,
             const float* pBlendWeight, const unsigned char* pBlendIndex,
-            const Matrix4* const* blendMatrices,
+            const Affine3* const* blendMatrices,
             size_t blendWeightStride, size_t blendIndexStride,
             size_t numWeightsPerVertex,
             size_t numIterations)
@@ -1007,7 +1004,7 @@ namespace Ogre {
     static OGRE_FORCE_INLINE void softwareVertexSkinning_SSE_PosOnly_Packed(
         const float* pSrcPos, float* pDestPos,
         const float* pBlendWeight, const unsigned char* pBlendIndex,
-        const Matrix4* const* blendMatrices,
+        const Affine3* const* blendMatrices,
         size_t blendWeightStride, size_t blendIndexStride,
         size_t numWeightsPerVertex,
         size_t numIterations)
@@ -1047,7 +1044,7 @@ namespace Ogre {
         // run out of usable CPU registers, or L1/L2 cache related problem, causing
         // slight performance loss than general version.
         //
-
+#if __OGRE_HAVE_NEON == 0
         if (PlatformInformation::getCpuIdentifier().find("AuthenticAMD") != String::npos)
         {
             // How can I check it's an Athlon XP but not Althon 64?
@@ -1060,19 +1057,21 @@ namespace Ogre {
                 mPreferGeneralVersionForSharedBuffers = true;
             }
         }
+#endif
     }
     //---------------------------------------------------------------------
     void OptimisedUtilSSE::softwareVertexSkinning(
         const float *pSrcPos, float *pDestPos,
         const float *pSrcNorm, float *pDestNorm,
         const float *pBlendWeight, const unsigned char* pBlendIndex,
-        const Matrix4* const* blendMatrices,
+        const Affine3* const* blendMatrices,
         size_t srcPosStride, size_t destPosStride,
         size_t srcNormStride, size_t destNormStride,
         size_t blendWeightStride, size_t blendIndexStride,
         size_t numWeightsPerVertex,
         size_t numVertices)
     {
+
         __OGRE_CHECK_STACK_ALIGNED_FOR_SSE();
 
         // All position/normal pointers should be perfect aligned, but still check here
@@ -1526,9 +1525,9 @@ namespace Ogre {
     }
     //---------------------------------------------------------------------
     void OptimisedUtilSSE::concatenateAffineMatrices(
-        const Matrix4& baseMatrix,
-        const Matrix4* pSrcMat,
-        Matrix4* pDstMat,
+        const Affine3& baseMatrix,
+        const Affine3* pSrcMat,
+        Affine3* pDstMat,
         size_t numMatrices)
     {
         __OGRE_CHECK_STACK_ALIGNED_FOR_SSE();
@@ -1575,9 +1574,6 @@ namespace Ogre {
             t2 = _mm_mul_ps(__MM_SELECT(m2, 2), s2);
             t3 = _mm_mul_ps(m2, m3);    // Compiler should optimise this out of the loop
             __MM_STORE_PS((*pDstMat)[2], __MM_ACCUM4_PS(t0,t1,t2,t3));
-
-            // Row 3
-            __MM_STORE_PS((*pDstMat)[3], m3);
 
             ++pDstMat;
         }
@@ -2138,6 +2134,7 @@ namespace Ogre {
     //---------------------------------------------------------------------
     //---------------------------------------------------------------------
     //---------------------------------------------------------------------
+    extern OptimisedUtil* _getOptimisedUtilSSE(void);
     extern OptimisedUtil* _getOptimisedUtilSSE(void)
     {
         static OptimisedUtilSSE msOptimisedUtilSSE;

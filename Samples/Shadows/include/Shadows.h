@@ -31,7 +31,7 @@ using namespace OgreBites;
 
 // New depth shadowmapping
 String CUSTOM_ROCKWALL_MATERIAL("Ogre/DepthShadowmap/Receiver/RockWall");
-String CUSTOM_CASTER_MATERIAL("Ogre/DepthShadowmap/Caster/Float");
+String CUSTOM_CASTER_MATERIAL("PSSM/shadow_caster");
 String CUSTOM_RECEIVER_MATERIAL("Ogre/DepthShadowmap/Receiver/Float");
 String CUSTOM_ATHENE_MATERIAL("Ogre/DepthShadowmap/Receiver/Athene");
 
@@ -56,9 +56,7 @@ public:
         mLight = light;
         mBillboard = billboard;
         mMinColour = minColour;
-        mColourRange.r = maxColour.r - minColour.r;
-        mColourRange.g = maxColour.g - minColour.g;
-        mColourRange.b = maxColour.b - minColour.b;
+        mColourRange = maxColour - minColour;
         mMinSize = minSize;
         mSizeRange = maxSize - minSize;
         
@@ -73,19 +71,14 @@ public:
     {
         intensity = value;
 
-        ColourValue newColour;
-
         // Attenuate the brightness of the light
-        newColour.r = mMinColour.r + (mColourRange.r * intensity);
-        newColour.g = mMinColour.g + (mColourRange.g * intensity);
-        newColour.b = mMinColour.b + (mColourRange.b * intensity);
+        ColourValue newColour = mMinColour + (mColourRange * intensity);
 
         mLight->setDiffuseColour(newColour);
         mBillboard->setColour(newColour);
         // set billboard size
         Real newSize = mMinSize + (intensity * mSizeRange);
         mBillboard->setDimensions(newSize, newSize);
-
     }
 };
 
@@ -96,9 +89,8 @@ class _OgreSampleClassExport Sample_Shadows : public SdkSample
 {
 protected:
     Entity* mAthene;
-    AnimationState* mAnimState;
     Entity* pPlaneEnt;
-    vector<Entity*>::type pColumns;
+    std::vector<Entity*> pColumns;
     Light* mLight;
     Light* mSunLight;
     SceneNode* mLightNode;
@@ -136,23 +128,9 @@ protected:
     ShadowCameraSetupPtr mCurrentShadowCameraSetup;
     /// Plane that defines plane-optimal shadow mapping basis
     MovablePlane* mPlane;
-    // transient pointer to LiSPSM setup if present
-    LiSPSMShadowCameraSetup* mLiSPSMSetup;
-
-    bool mIsOpenGL;
-
 public:
-
-    bool frameEnded(const FrameEvent& evt)
-    {
-        if (mAnimState)
-                mAnimState->addTime(evt.timeSinceLastFrame);
-        return SdkSample::frameEnded(evt);
-    }
-
     Sample_Shadows()
-        : mAnimState(0)
-        , mLightNode(0)
+        : mLightNode(0)
         , mLightAnimationState(0)
         , mMinLightColour(0.2, 0.1, 0.0)
         , mMaxLightColour(0.5, 0.3, 0.1)
@@ -169,49 +147,10 @@ public:
     }
 
 protected:
-
-    // Override this to ensure FPU mode
-    //bool configure(void)
-    //{
-    //  // Show the configuration dialog and initialise the system
-    //  // You can skip this and use root.restoreConfig() to load configuration
-    //  // settings if you were sure there are valid ones saved in ogre.cfg
-    //  if(mRoot->showConfigDialog())
-    //  {
-    //      // Custom option - to use PlaneOptimalShadowCameraSetup we must have
-    //      // double-precision. Thus, set the D3D floating point mode if present, 
-    //      // no matter what was chosen
-    //      ConfigOptionMap& optMap = mRoot->getRenderSystem()->getConfigOptions();
-    //      ConfigOptionMap::iterator i = optMap.find("Floating-point mode");
-    //      if (i != optMap.end())
-    //      {
-    //          if (i->second.currentValue != "Consistent")
-    //          {
-    //              i->second.currentValue = "Consistent";
-    //              LogManager::getSingleton().logMessage("Demo_Shadows: overriding "
-    //                  "D3D floating point mode to 'Consistent' to ensure precision "
-    //                  "for plane-optimal camera setup option");
-
-    //          }
-    //      }
-
-    //      // If returned true, user clicked OK so initialise
-    //      // Here we choose to let the system create a default rendering window by passing 'true'
-    //      mWindow = mRoot->initialise(true);
-    //      return true;
-    //  }
-    //  else
-    //  {
-    //      return false;
-    //  }
-    //}
     
     // Just override the mandatory create scene method
     void setupContent(void)
     {
-        // Need to detect D3D or GL for best depth shadowmapping
-        mIsOpenGL = Root::getSingleton().getRenderSystem()->getName().find("GL") != String::npos;
-
         // do this first so we generate edge lists
         if (mRoot->getRenderSystem()->getCapabilities()->hasCapability(RSC_HWSTENCIL))
         {
@@ -231,9 +170,10 @@ protected:
         mSunLight->setType(Light::LT_SPOTLIGHT);
 
         Vector3 pos(1500,1750,1300);
-        mSceneMgr->getRootSceneNode()->createChildSceneNode(pos)->attachObject(mSunLight);
+        auto ln = mSceneMgr->getRootSceneNode()->createChildSceneNode(pos);
+        ln->attachObject(mSunLight);
+        ln->setDirection(-pos.normalisedCopy());
         mSunLight->setSpotlightRange(Degree(30), Degree(50));
-        mSunLight->setDirection(-pos.normalisedCopy());
         mSunLight->setDiffuseColour(0.35, 0.35, 0.38);
         mSunLight->setSpecularColour(0.9, 0.9, 1);
 
@@ -255,8 +195,7 @@ protected:
         mLightNode->attachObject(bbs);
 
         // create controller, after this is will get updated on its own
-        ControllerFunctionRealPtr func = ControllerFunctionRealPtr(
-            new WaveformControllerFunction(Ogre::WFT_SINE, 0.75, 0.5));
+        ControllerFunctionRealPtr func = WaveformControllerFunction::create(Ogre::WFT_SINE, 0.75, 0.5);
         ControllerManager& contMgr = ControllerManager::getSingleton();
         ControllerValueRealPtr val = ControllerValueRealPtr(
             new LightWibbler(mLight, bb, mMinLightColour, mMaxLightColour, 
@@ -298,8 +237,12 @@ protected:
         key = track->createNodeKeyFrame(20);//K == A
         key->setTranslate(Vector3(300,750,-700));
         // Create a new animation state to track this
-        mAnimState = mSceneMgr->createAnimationState("LightTrack");
-        mAnimState->setEnabled(true);
+        auto animState = mSceneMgr->createAnimationState("LightTrack");
+        animState->setEnabled(true);
+
+        auto& controllerMgr = ControllerManager::getSingleton();
+        controllerMgr.createFrameTimePassthroughController(AnimationStateControllerValue::create(animState, true));
+
         // Make light node look at origin, this is for when we
         // change the moving light to a spotlight
         mLightNode->setAutoTracking(true, mSceneMgr->getRootSceneNode());
@@ -321,26 +264,20 @@ protected:
         node->translate(0,-27, 0);
         node->yaw(Degree(90));
 
-        Entity* pEnt;
         // Columns
         for (int x = -2; x <= 2; ++x)
         {
             for (int z = -2; z <= 2; ++z)
             {
-                if (x != 0 || z != 0)
-                {
-                    StringStream str;
-                    str << "col" << x << "_" << z;
-                    node = mSceneMgr->getRootSceneNode()->createChildSceneNode();
-                    pEnt = mSceneMgr->createEntity( str.str(), "column.mesh" );
-                    pEnt->setMaterialName(BASIC_ROCKWALL_MATERIAL);
-                    pColumns.push_back(pEnt);
-                    node->attachObject( pEnt );
-                    node->translate(x*300,0, z*300);
+                if (x == 0 && z == 0)
+                    continue;
 
-                }
+                Entity* pEnt = mSceneMgr->createEntity("column.mesh" );
+                pEnt->setMaterialName(BASIC_ROCKWALL_MATERIAL);
+                pColumns.push_back(pEnt);
+                node = mSceneMgr->getRootSceneNode()->createChildSceneNode(Vector3(x*300,0, z*300));
+                node->attachObject( pEnt );
             }
-
         }
 
 
@@ -358,25 +295,11 @@ protected:
         pPlaneEnt->setMaterialName(BASIC_ROCKWALL_MATERIAL);
         pPlaneEnt->setCastShadows(false);
         mSceneMgr->getRootSceneNode()->createChildSceneNode()->attachObject(pPlaneEnt);
-
-        if (mRoot->getRenderSystem()->getCapabilities()->hasCapability(RSC_HWRENDER_TO_TEXTURE))
-        {
-            // In D3D, use a 1024x1024 shadow texture
-            mSceneMgr->setShadowTextureSettings(1024, 2);
-        }
-        else
-        {
-            // Use 512x512 texture in GL since we can't go higher than the window res
-            mSceneMgr->setShadowTextureSettings(512, 2);
-        }
-
+        mSceneMgr->setShadowTextureSettings(1024, 2);
         mSceneMgr->setShadowColour(ColourValue(0.5, 0.5, 0.5));
         //mSceneMgr->setShowDebugShadows(true);
 
         setupGUI();
-#if OGRE_PLATFORM != OGRE_PLATFORM_APPLE_IOS
-        setDragLook(true);
-#endif
     }
 
     virtual void setupView()
@@ -386,8 +309,8 @@ protected:
         // incase infinite far distance is not supported
         mCamera->setFarClipDistance(100000);
 
-        mCameraNode->setPosition(250, 20, 400);
-        mCameraNode->lookAt(Vector3(0, 10, 0), Node::TS_WORLD);
+        mCameraMan->setStyle(CS_ORBIT);
+        mCameraMan->setYawPitchDist(Degree(0), Degree(45), 400);
     }
     
     virtual void cleanupContent()
@@ -404,16 +327,7 @@ protected:
     {
         mSceneMgr->setShadowTechnique(newTech);
 
-        // Below is for projection
-        //configureShadowCameras(mCurrentShadowTechnique, newTech);
-
         configureLights(newTech);
-
-        // Advanced modes - materials / compositors
-        //configureCompositors(mCurrentShadowTechnique, newTech);
-        //configureTextures(mCurrentShadowTechnique, newTech);
-        //configureShadowCasterReceiverMaterials(mCurrentShadowTechnique, newTech);
-
         updateGUI(newTech);
 
         mCurrentShadowTechnique = newTech;
@@ -424,47 +338,18 @@ protected:
         Vector3 dir;
         switch (newTech)
         {
-        case SHADOWTYPE_STENCIL_ADDITIVE:
-            // Fixed light, dim
-            mSunLight->setCastShadows(true);
-
-            // Point light, movable, reddish
-            mLight->setType(Light::LT_POINT);
-            mLight->setCastShadows(true);
-            mLight->setDiffuseColour(mMinLightColour);
-            mLight->setSpecularColour(1, 1, 1);
-            mLight->setAttenuation(8000,1,0.0005,0);
-
-            break;
         case SHADOWTYPE_STENCIL_MODULATIVE:
             // Multiple lights cause obvious silhouette edges in modulative mode
-            // So turn off shadows on the direct light
-            // Fixed light, dim
-            mSunLight->setCastShadows(false);
-
+            // mSunLight->setCastShadows(false); // turn off shadows on the direct light to fix it
+        case SHADOWTYPE_STENCIL_ADDITIVE:
             // Point light, movable, reddish
             mLight->setType(Light::LT_POINT);
-            mLight->setCastShadows(true);
-            mLight->setDiffuseColour(mMinLightColour);
-            mLight->setSpecularColour(1, 1, 1);
-            mLight->setAttenuation(8000,1,0.0005,0);
             break;
         case SHADOWTYPE_TEXTURE_MODULATIVE:
         case SHADOWTYPE_TEXTURE_ADDITIVE:
-            // Fixed light, dim
-            mSunLight->setCastShadows(true);
-
             // Change moving light to spotlight
-            // Point light, movable, reddish
             mLight->setType(Light::LT_SPOTLIGHT);
-            mLight->setDirection(Vector3::NEGATIVE_UNIT_Z);
-            mLight->setCastShadows(true);
-            mLight->setDiffuseColour(mMinLightColour);
-            mLight->setSpecularColour(1, 1, 1);
-            mLight->setAttenuation(8000,1,0.0005,0);
             mLight->setSpotlightRange(Degree(80),Degree(90));
-
-
             break;
         default:
             break;
@@ -529,23 +414,32 @@ protected:
 
         updateGUI(mCurrentShadowTechnique);
         mTrayMgr->showCursor();
+
+        // Uncomment this to display the shadow textures
+        // addTextureDebugOverlay(TL_RIGHT, mSceneMgr->getShadowTexture(0), 0);
+        // addTextureDebugOverlay(TL_RIGHT, mSceneMgr->getShadowTexture(1), 1);
     }
 
     void updateGUI(ShadowTechnique newTech)
     {
-        bool isTextureBased = (newTech & SHADOWDETAILTYPE_TEXTURE) != 0;
-
-        if (isTextureBased) 
+        if (newTech & SHADOWDETAILTYPE_TEXTURE)
         {
             mProjectionMenu->show();
             mTrayMgr->moveWidgetToTray(mProjectionMenu, TL_TOPLEFT);
-            mMaterialMenu->show();
-            mTrayMgr->moveWidgetToTray(mMaterialMenu, TL_TOPLEFT);
         }
         else 
         {
             mProjectionMenu->hide();
             mTrayMgr->removeWidgetFromTray(mProjectionMenu);
+        }
+
+        if((newTech & SHADOWTYPE_TEXTURE_ADDITIVE) == SHADOWTYPE_TEXTURE_ADDITIVE)
+        {
+            mMaterialMenu->show();
+            mTrayMgr->moveWidgetToTray(mMaterialMenu, TL_TOPLEFT);
+        }
+        else
+        {
             mMaterialMenu->hide();
             mTrayMgr->removeWidgetFromTray(mMaterialMenu);
         }
@@ -564,7 +458,7 @@ protected:
     {
         bool isStencil = mTechniqueMenu->getSelectionIndex() == 0;
         bool isAdditive = mLightingMenu->getSelectionIndex() == 0;
-        ShadowTechnique newTech = mCurrentShadowTechnique;
+        ShadowTechnique newTech = ShadowTechnique(mCurrentShadowTechnique & ~SHADOWDETAILTYPE_INTEGRATED);
 
         if (isStencil)
         {
@@ -585,6 +479,7 @@ protected:
         }
         else
         {
+            mMaterialMenu->selectItem(0);
             newTech = static_cast<ShadowTechnique>(
                 (newTech & ~SHADOWDETAILTYPE_ADDITIVE) | SHADOWDETAILTYPE_MODULATIVE);
         }
@@ -601,23 +496,17 @@ protected:
             switch(proj)
             {
             case UNIFORM:
-                mCurrentShadowCameraSetup = 
-                    ShadowCameraSetupPtr(new DefaultShadowCameraSetup());
+                mCurrentShadowCameraSetup = DefaultShadowCameraSetup::create();
                 break;
             case UNIFORM_FOCUSED:
-                mCurrentShadowCameraSetup = 
-                    ShadowCameraSetupPtr(new FocusedShadowCameraSetup());
+                mCurrentShadowCameraSetup = FocusedShadowCameraSetup::create();
                 break;
             case LISPSM:
-                {
-                    mLiSPSMSetup = new LiSPSMShadowCameraSetup();
-                    //mLiSPSMSetup->setUseAggressiveFocusRegion(false);
-                    mCurrentShadowCameraSetup = ShadowCameraSetupPtr(mLiSPSMSetup);
-                }
+                //mLiSPSMSetup->setUseAggressiveFocusRegion(false);
+                mCurrentShadowCameraSetup = LiSPSMShadowCameraSetup::create();
                 break;
             case PLANE_OPTIMAL:
-                mCurrentShadowCameraSetup = 
-                    ShadowCameraSetupPtr(new PlaneOptimalShadowCameraSetup(mPlane));
+                mCurrentShadowCameraSetup = PlaneOptimalShadowCameraSetup::create(mPlane);
                 break;
 
             };
@@ -625,7 +514,6 @@ protected:
 
             mSceneMgr->setShadowCameraSetup(mCurrentShadowCameraSetup);
 
-            //updateTipForCombo(cbo);
             if (mCustomRockwallVparams && mCustomRockwallFparams)
             {
                 // set
@@ -680,25 +568,12 @@ protected:
         }
     }
 
-    void rebindDebugShadowOverlays()
-    {
-        /*MaterialPtr debugMat = 
-            MaterialManager::getSingleton().getByName("Ogre/DebugShadowMap0");
-        TexturePtr shadowTex = mSceneMgr->getShadowTexture(0);
-        debugMat->getTechnique(0)->getPass(0)->getTextureUnitState(0)->setTextureName(shadowTex->getName());
-
-        debugMat = 
-            MaterialManager::getSingleton().getByName("Ogre/DebugShadowMap1");
-        shadowTex = mSceneMgr->getShadowTexture(1);
-        debugMat->getTechnique(0)->getPass(0)->getTextureUnitState(0)->setTextureName(shadowTex->getName());*/
-    }
-
     void resetMaterials()
     {
         // Sort out base materials
         pPlaneEnt->setMaterialName(BASIC_ROCKWALL_MATERIAL);
         mAthene->setMaterialName(BASIC_ATHENE_MATERIAL);
-        for (vector<Entity*>::type::iterator i = pColumns.begin();
+        for (std::vector<Entity*>::iterator i = pColumns.begin();
             i != pColumns.end(); ++i)
         {
             (*i)->setMaterialName(BASIC_ROCKWALL_MATERIAL);
@@ -721,45 +596,39 @@ protected:
             switch(mat)
             {
             case MAT_STANDARD:
-                mSceneMgr->setShadowTexturePixelFormat(PF_X8R8G8B8);
-                mSceneMgr->setShadowTextureCasterMaterial(BLANKSTRING);
-                mSceneMgr->setShadowTextureReceiverMaterial(BLANKSTRING);
+                mSceneMgr->setShadowTexturePixelFormat(PF_BYTE_RGBA);
+                mSceneMgr->setShadowTechnique(SHADOWTYPE_TEXTURE_ADDITIVE);
+
+                mSceneMgr->setShadowTextureCasterMaterial(MaterialPtr());
                 mSceneMgr->setShadowTextureSelfShadow(false);   
                 
                 resetMaterials();
 
                 break;
             case MAT_DEPTH_FLOAT:
-                //if (mIsOpenGL)
-                //{
-                //  // GL performs much better if you pick half-float format
-                //  mSceneMgr->setShadowTexturePixelFormat(PF_FLOAT16_R);
-                //}
-                //else
-                {
-                    // D3D is the opposite - if you ask for PF_FLOAT16_R you
-                    // get an integer format instead! You can ask for PF_FLOAT16_GR
-                    // but the precision doesn't work well
-                    mSceneMgr->setShadowTexturePixelFormat(PF_FLOAT32_R);
-                }
-                mSceneMgr->setShadowTextureCasterMaterial(CUSTOM_CASTER_MATERIAL);
-                mSceneMgr->setShadowTextureReceiverMaterial(CUSTOM_RECEIVER_MATERIAL);
+                mSceneMgr->setShadowTexturePixelFormat(PF_FLOAT32_R);
+                mSceneMgr->setShadowTechnique(SHADOWTYPE_TEXTURE_ADDITIVE_INTEGRATED);
+
+                themat = MaterialManager::getSingleton().getByName(CUSTOM_CASTER_MATERIAL);
+                mSceneMgr->setShadowTextureCasterMaterial(themat);
                 mSceneMgr->setShadowTextureSelfShadow(true);    
                 // Sort out base materials
                 pPlaneEnt->setMaterialName(CUSTOM_ROCKWALL_MATERIAL);
                 mAthene->setMaterialName(CUSTOM_ATHENE_MATERIAL);
-                for (vector<Entity*>::type::iterator i = pColumns.begin();
+                for (std::vector<Entity*>::iterator i = pColumns.begin();
                     i != pColumns.end(); ++i)
                 {
                     (*i)->setMaterialName(CUSTOM_ROCKWALL_MATERIAL);
                 }
 
                 themat = MaterialManager::getSingleton().getByName(CUSTOM_ROCKWALL_MATERIAL);
-                mCustomRockwallVparams = themat->getTechnique(0)->getPass(1)->getShadowReceiverVertexProgramParameters();
-                mCustomRockwallFparams = themat->getTechnique(0)->getPass(1)->getShadowReceiverFragmentProgramParameters();
+                themat->load();
+                mCustomRockwallVparams = themat->getBestTechnique()->getPass(1)->getVertexProgramParameters();
+                mCustomRockwallFparams = themat->getBestTechnique()->getPass(1)->getFragmentProgramParameters();
                 themat = MaterialManager::getSingleton().getByName(CUSTOM_ATHENE_MATERIAL);
-                mCustomAtheneVparams = themat->getTechnique(0)->getPass(1)->getShadowReceiverVertexProgramParameters();
-                mCustomAtheneFparams = themat->getTechnique(0)->getPass(1)->getShadowReceiverFragmentProgramParameters();
+                themat->load();
+                mCustomAtheneVparams = themat->getBestTechnique()->getPass(1)->getVertexProgramParameters();
+                mCustomAtheneFparams = themat->getBestTechnique()->getPass(1)->getFragmentProgramParameters();
                 showSliders = true;
 
 
@@ -767,36 +636,29 @@ protected:
                 setDefaultDepthShadowParams();
                 break;
             case MAT_DEPTH_FLOAT_PCF:
-                //if (mIsOpenGL)
-                //{
-                //  // GL performs much better if you pick half-float format
-                //  mSceneMgr->setShadowTexturePixelFormat(PF_FLOAT16_R);
-                //}
-                //else
-                {
-                    // D3D is the opposite - if you ask for PF_FLOAT16_R you
-                    // get an integer format instead! You can ask for PF_FLOAT16_GR
-                    // but the precision doesn't work well
-                    mSceneMgr->setShadowTexturePixelFormat(PF_FLOAT32_R);
-                }
-                mSceneMgr->setShadowTextureCasterMaterial(CUSTOM_CASTER_MATERIAL);
-                mSceneMgr->setShadowTextureReceiverMaterial(CUSTOM_RECEIVER_MATERIAL + "/PCF");
+                mSceneMgr->setShadowTexturePixelFormat(PF_FLOAT32_R);
+                mSceneMgr->setShadowTechnique(SHADOWTYPE_TEXTURE_ADDITIVE_INTEGRATED);
+
+                themat = MaterialManager::getSingleton().getByName(CUSTOM_CASTER_MATERIAL);
+                mSceneMgr->setShadowTextureCasterMaterial(themat);
                 mSceneMgr->setShadowTextureSelfShadow(true);    
                 // Sort out base materials
                 pPlaneEnt->setMaterialName(CUSTOM_ROCKWALL_MATERIAL + "/PCF");
                 mAthene->setMaterialName(CUSTOM_ATHENE_MATERIAL + "/PCF");
-                for (vector<Entity*>::type::iterator i = pColumns.begin();
+                for (std::vector<Entity*>::iterator i = pColumns.begin();
                     i != pColumns.end(); ++i)
                 {
                     (*i)->setMaterialName(CUSTOM_ROCKWALL_MATERIAL + "/PCF");
                 }
 
                 themat = MaterialManager::getSingleton().getByName(CUSTOM_ROCKWALL_MATERIAL + "/PCF");
-                mCustomRockwallVparams = themat->getTechnique(0)->getPass(1)->getShadowReceiverVertexProgramParameters();
-                mCustomRockwallFparams = themat->getTechnique(0)->getPass(1)->getShadowReceiverFragmentProgramParameters();
+                themat->load();
+                mCustomRockwallVparams = themat->getBestTechnique()->getPass(1)->getVertexProgramParameters();
+                mCustomRockwallFparams = themat->getBestTechnique()->getPass(1)->getFragmentProgramParameters();
                 themat = MaterialManager::getSingleton().getByName(CUSTOM_ATHENE_MATERIAL + "/PCF");
-                mCustomAtheneVparams = themat->getTechnique(0)->getPass(1)->getShadowReceiverVertexProgramParameters();
-                mCustomAtheneFparams = themat->getTechnique(0)->getPass(1)->getShadowReceiverFragmentProgramParameters();
+                themat->load();
+                mCustomAtheneVparams = themat->getBestTechnique()->getPass(1)->getVertexProgramParameters();
+                mCustomAtheneFparams = themat->getBestTechnique()->getPass(1)->getFragmentProgramParameters();
                 showSliders = true;
 
                 // set the current params
@@ -823,8 +685,6 @@ protected:
                 mClampSlider->hide();       
                 mTrayMgr->removeWidgetFromTray(mClampSlider);       
             }
-            //updateTipForCombo(cbo);
-            //rebindDebugShadowOverlays();
         }
     }
 };

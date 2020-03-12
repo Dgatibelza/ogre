@@ -80,17 +80,6 @@ protected:
         delete mSystem;
     }
     
-    bool frameRenderingQueued(const FrameEvent& evt)
-    {
-        if( SdkSample::frameRenderingQueued(evt) == false )
-            return false;
-        SharedData::getSingleton().iLastFrameTime = evt.timeSinceLastFrame;
-        
-        if (SharedData::getSingleton().mMLAnimState)
-            SharedData::getSingleton().mMLAnimState->addTime(evt.timeSinceLastFrame);
-        return true;
-    }
-    
     void setupControls()
     {
         mTrayMgr->showCursor();
@@ -187,23 +176,21 @@ protected:
         Vector3 knotDiff(-3.7, 0, 0);
         for (int i=0; i < 5; i++)
         {
-            char cloneName[16];
-            sprintf(cloneName, "Knot%d", i);
-            Entity* cloneKnot = knotEnt->clone(cloneName);
+            Entity* cloneKnot = knotEnt->clone(StringUtil::format("Knot%d", i));
             Vector3 clonePos = knotStartPos + knotDiff*i;
             SceneNode* cloneNode = rootNode->createChildSceneNode(clonePos);
             cloneNode->attachObject(cloneKnot);
             setEntityHeight(cloneKnot, 3);
             cloneNode->yaw(Degree(i*17));
             cloneNode->roll(Degree(i*31));
-            
-            sprintf(cloneName, "KnotLight%d", i);
-            Light* knotLight = mSceneMgr->createLight(cloneName);
+
+            Light* knotLight = mSceneMgr->createLight(StringUtil::format("KnotLight%d", i));
+            SceneNode* ln = rootNode->createChildSceneNode(clonePos + Vector3(0,3,0));
+            ln->setDirection(Vector3::NEGATIVE_UNIT_Y);
+            ln->attachObject(knotLight);
             knotLight->setType(Light::LT_SPOTLIGHT);
             knotLight->setDiffuseColour(SAMPLE_COLORS[i]);
             knotLight->setSpecularColour(ColourValue::White);
-            knotLight->setPosition(clonePos + Vector3(0,3,0));
-            knotLight->setDirection(Vector3::NEGATIVE_UNIT_Y);
             knotLight->setSpotlightRange(Degree(25), Degree(45), 1);
             knotLight->setAttenuation(6, 1, 0.2, 0);
         }
@@ -218,9 +205,7 @@ protected:
         Vector3 headDiff(-3.7,0,0);
         for (int i=0; i < 12; i++) 
         {
-            char cloneName[16];
-            sprintf(cloneName, "OgreHead%d", i);
-            Entity* cloneHead = ogreHead->clone(cloneName);
+            Entity* cloneHead = ogreHead->clone(StringUtil::format("OgreHead%d", i));
             Vector3 clonePos = headStartPos[i%2] + headDiff*(i/2);
             if ((i/2) >= 4) clonePos.x -= 0.75;
             SceneNode* cloneNode = rootNode->createChildSceneNode(clonePos);
@@ -238,9 +223,7 @@ protected:
         Vector3 woodDiff(0, 0.3, 0);
         for (int i=0; i < 5; i++)
         {
-            char cloneName[16];
-            sprintf(cloneName, "WoodPallet%d", i);
-            Entity* clonePallet = woodPallet->clone(cloneName);
+            Entity* clonePallet = woodPallet->clone(StringUtil::format("WoodPallet%d", i));
             Vector3 clonePos = woodStartPos + woodDiff*i;
             SceneNode* cloneNode = rootNode->createChildSceneNode(clonePos);
             cloneNode->attachObject(clonePallet);
@@ -250,22 +233,8 @@ protected:
         
     }
 
-    StringVector getRequiredPlugins()
-    {
-        StringVector names;
-        if (!GpuProgramManager::getSingleton().isSyntaxSupported("glsles") && !GpuProgramManager::getSingleton().isSyntaxSupported("glsl150"))
-            names.push_back("Cg Program Manager");
-        return names;
-    }
-
     void testCapabilities(const RenderSystemCapabilities* caps)
     {
-        if (!caps->hasCapability(RSC_VERTEX_PROGRAM) || !(caps->hasCapability(RSC_FRAGMENT_PROGRAM)))
-        {
-            OGRE_EXCEPT(Exception::ERR_NOT_IMPLEMENTED, "Your card does not support vertex and fragment programs, so cannot "
-                        "run this demo. Sorry!", 
-                        "DeferredShading::testCapabilities");
-        }
         if (caps->getNumMultiRenderTargets()<2)
         {
             OGRE_EXCEPT(Exception::ERR_NOT_IMPLEMENTED, "Your card does not support at least two simultaneous render targets, so cannot "
@@ -273,9 +242,7 @@ protected:
                         "DeferredShading::testCapabilities");
         }
 
-        if (!GpuProgramManager::getSingleton().isSyntaxSupported("vs_1_1") &&
-            !GpuProgramManager::getSingleton().isSyntaxSupported("arbvp1") &&
-            !GpuProgramManager::getSingleton().isSyntaxSupported("vs_4_0") &&
+        if (!GpuProgramManager::getSingleton().isSyntaxSupported("hlsl") &&
             !GpuProgramManager::getSingleton().isSyntaxSupported("glsl300es") &&
             !GpuProgramManager::getSingleton().isSyntaxSupported("glsl150"))
         {
@@ -299,12 +266,15 @@ protected:
         Light* l1 = mSceneMgr->createLight();
         l1->setType(Light::LT_DIRECTIONAL);
         l1->setDiffuseColour(0.5f, 0.45f, 0.1f);
-        l1->setDirection(1, -0.5, -0.2);
         l1->setShadowFarClipDistance(250);
         l1->setShadowFarDistance(75);
         //Turn this on to have the directional light cast shadows
         l1->setCastShadows(false);
         
+        auto ln = mSceneMgr->getRootSceneNode()->createChildSceneNode();
+        ln->setDirection(Vector3(1, -0.5, -0.2));
+        ln->attachObject(l1);
+
         mCameraNode->setPosition(25, 5, 0);
         mCameraNode->lookAt(Vector3::ZERO, Node::TS_PARENT);
         mCamera->setFarClipDistance(1000.0);
@@ -342,10 +312,10 @@ protected:
     void createSampleLights()
     {
         // Create some lights       
-        vector<Light*>::type lights;
+        std::vector<Light*> lights;
         SceneNode *parentNode = mSceneMgr->getRootSceneNode()->createChildSceneNode("LightsParent");
         // Create light nodes
-        vector<Node*>::type nodes;
+        std::vector<Node*> nodes;
         
         Vector4 attParams = Vector4(4,1,0,7);
         Real lightRadius = 25;
@@ -414,7 +384,7 @@ protected:
         // Create marker meshes to show user where the lights are
         Entity *ent;
         GeomUtils::createSphere("PointLightMesh", 0.05f, 5, 5, true, true);
-        for(vector<Light*>::type::iterator i=lights.begin(); i!=lights.end(); ++i)
+        for(std::vector<Light*>::iterator i=lights.begin(); i!=lights.end(); ++i)
         {
             Light* light = *i;
             ent = mSceneMgr->createEntity(light->getName()+"v", "PointLightMesh");
@@ -479,8 +449,11 @@ protected:
             }
         }
         // Create a new animation state to track this
-        SharedData::getSingleton().mMLAnimState = mSceneMgr->createAnimationState("LightSwarmTrack");
-        SharedData::getSingleton().mMLAnimState->setEnabled(true);
+        auto animState = mSceneMgr->createAnimationState("LightSwarmTrack");
+        animState->setEnabled(true);
+
+        auto& controllerMgr = ControllerManager::getSingleton();
+        controllerMgr.createFrameTimePassthroughController(AnimationStateControllerValue::create(animState, true));
         
         /*Light* spotLight = mSceneMgr->createLight("Spotlight1");
          spotLight->setType(Light::LT_SPOTLIGHT);

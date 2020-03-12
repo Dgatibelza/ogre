@@ -26,11 +26,7 @@
  * -----------------------------------------------------------------------------
  */
 
-#include "OgreLodBuffer.h"
-#include "OgreHardwareBufferManager.h"
-#include "OgreVector3.h"
-#include "OgreSubMesh.h"
-#include "OgreMesh.h"
+#include "OgreMeshLodPrecompiledHeaders.h"
 
 namespace Ogre
 {
@@ -84,8 +80,6 @@ namespace Ogre
                     vNormal = vStart;
                 }  else {
                     vNormalBuf = data->vertexBufferBinding->getBuffer(elemNormal->getSource());
-                    assert(vNormalBuf->getSizeInBytes() == vbuf->getSizeInBytes());
-                    assert(vNormalBuf->getVertexSize() == vbuf->getVertexSize());
                     vNormal = static_cast<unsigned char*>(vNormalBuf->lock(HardwareBuffer::HBL_READ_ONLY));
                 }
                 vNormalSize = vNormalBuf->getVertexSize();

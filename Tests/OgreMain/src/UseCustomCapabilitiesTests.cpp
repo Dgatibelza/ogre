@@ -32,11 +32,7 @@ THE SOFTWARE.
 #include "OgreRenderSystemCapabilitiesSerializer.h"
 #include "OgreRenderSystemCapabilitiesManager.h"
 #include "OgreStringConverter.h"
-
-
-#if OGRE_PLATFORM == OGRE_PLATFORM_APPLE || OGRE_PLATFORM == OGRE_PLATFORM_APPLE_IOS
-#include "macUtils.h"
-#endif
+#include "OgreFileSystemLayer.h"
 
 // Register the test suite
 
@@ -61,20 +57,14 @@ void UseCustomCapabilitiesTests::TearDown()
 {
 }
 //--------------------------------------------------------------------------
-void checkCaps(const Ogre::RenderSystemCapabilities* caps)
+static void checkCaps(const Ogre::RenderSystemCapabilities* caps)
 {
     using namespace Ogre;
 
-    EXPECT_EQ(caps->hasCapability(RSC_AUTOMIPMAP), true);
-    EXPECT_EQ(caps->hasCapability(RSC_BLENDING), true);
     EXPECT_EQ(caps->hasCapability(RSC_ANISOTROPY), true);
     EXPECT_EQ(caps->hasCapability(RSC_DOT3), true);
-    EXPECT_EQ(caps->hasCapability(RSC_CUBEMAPPING), true);
     EXPECT_EQ(caps->hasCapability(RSC_HWSTENCIL), true);
 
-    EXPECT_EQ(caps->hasCapability(RSC_VBO), true);
-    EXPECT_EQ(caps->hasCapability(RSC_VERTEX_PROGRAM), true);
-    EXPECT_EQ(caps->hasCapability(RSC_FRAGMENT_PROGRAM), true);
     EXPECT_EQ(caps->hasCapability(RSC_SCISSOR_TEST), true);
     EXPECT_EQ(caps->hasCapability(RSC_TWO_SIDED_STENCIL), true);
     EXPECT_EQ(caps->hasCapability(RSC_STENCIL_WRAP), true);
@@ -99,10 +89,7 @@ void checkCaps(const Ogre::RenderSystemCapabilities* caps)
     EXPECT_EQ(caps->hasCapability(RSC_TEXTURE_COMPRESSION_PVRTC), false);
     EXPECT_EQ(caps->hasCapability(RSC_TEXTURE_COMPRESSION_BC4_BC5), false);
     EXPECT_EQ(caps->hasCapability(RSC_TEXTURE_COMPRESSION_BC6H_BC7), false);
-    EXPECT_EQ(caps->hasCapability(RSC_FBO), true);
-    EXPECT_EQ(caps->hasCapability(RSC_FBO_ARB), false);
 
-    EXPECT_EQ(caps->hasCapability(RSC_FBO_ATI), false);
     EXPECT_EQ(caps->hasCapability(RSC_PBUFFER), false);
     EXPECT_EQ(caps->hasCapability(RSC_PERSTAGECONSTANT), false);
     EXPECT_EQ(caps->hasCapability(RSC_VAO), false);
@@ -119,10 +106,8 @@ void checkCaps(const Ogre::RenderSystemCapabilities* caps)
     EXPECT_EQ(caps->getMaxPointSize(), (Real)1024);
     EXPECT_EQ(caps->getNonPOW2TexturesLimited(), false);
     EXPECT_EQ(caps->getVertexTextureUnitsShared(), true);
-    EXPECT_EQ(caps->getNumWorldMatrices(), (Ogre::ushort)0);
     EXPECT_EQ(caps->getNumTextureUnits(), (Ogre::ushort)16);
     EXPECT_EQ(caps->getStencilBufferBitDepth(), (Ogre::ushort)8);
-    EXPECT_EQ(caps->getNumVertexBlendMatrices(), (Ogre::ushort)0);
     EXPECT_EQ(caps->getNumMultiRenderTargets(), (Ogre::ushort)4);
 
     EXPECT_EQ(caps->getVertexProgramConstantFloatCount(), (Ogre::ushort)256);
@@ -138,7 +123,7 @@ void checkCaps(const Ogre::RenderSystemCapabilities* caps)
     EXPECT_TRUE(caps->isShaderProfileSupported("arbfp1"));
 }
 //--------------------------------------------------------------------------
-void setUpGLRenderSystemOptions(Ogre::RenderSystem* rs)
+static void setUpGLRenderSystemOptions(Ogre::RenderSystem* rs)
 {
     using namespace Ogre;
     ConfigOptionMap options = rs->getConfigOptions();
@@ -175,7 +160,7 @@ TEST_F(UseCustomCapabilitiesTests,CustomCapabilitiesGL)
 #else
 
 #if OGRE_PLATFORM == OGRE_PLATFORM_APPLE || OGRE_PLATFORM == OGRE_PLATFORM_APPLE_IOS
-    Root* root = OGRE_NEW Root(macBundlePath() + "/Contents/Resources/plugins.cfg");
+    Root* root = OGRE_NEW Root(FileSystemLayer::resolveBundlePath("Contents/Resources/plugins.cfg"));
 #else
     Root* root = OGRE_NEW Root("plugins.cfg");
 #endif
@@ -195,7 +180,7 @@ TEST_F(UseCustomCapabilitiesTests,CustomCapabilitiesGL)
 
 #if OGRE_PLATFORM == OGRE_PLATFORM_APPLE || OGRE_PLATFORM == OGRE_PLATFORM_APPLE_IOS
             root->initialise(true, "OGRE testCustomCapabilitiesGL Window",
-                macBundlePath() + "/Contents/Resources/Media/CustomCapabilities/customCapabilitiesTest.cfg");
+                FileSystemLayer::resolveBundlePath("Contents/Resources/Media/CustomCapabilities/customCapabilitiesTest.cfg"));
 #else
             root->initialise(true, "OGRE testCustomCapabilitiesGL Window",
                 "../../Tests/Media/CustomCapabilities/customCapabilitiesTest.cfg");
@@ -213,7 +198,7 @@ TEST_F(UseCustomCapabilitiesTests,CustomCapabilitiesGL)
     OGRE_DELETE root;
 }
 //--------------------------------------------------------------------------
-void setUpD3D9RenderSystemOptions(Ogre::RenderSystem* rs)
+static void setUpD3D9RenderSystemOptions(Ogre::RenderSystem* rs)
 {
     using namespace Ogre;
     ConfigOptionMap options = rs->getConfigOptions();

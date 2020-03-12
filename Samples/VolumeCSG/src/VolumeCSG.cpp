@@ -47,9 +47,12 @@ void Sample_VolumeCSG::setupContent(void)
     // Light
     Light* directionalLight0 = mSceneMgr->createLight("directionalLight0");
     directionalLight0->setType(Light::LT_DIRECTIONAL);
-    directionalLight0->setDirection(Vector3((Real)1, (Real)-1, (Real)1));
     directionalLight0->setDiffuseColour((Real)1, (Real)0.98, (Real)0.73);
     directionalLight0->setSpecularColour((Real)0.1, (Real)0.1, (Real)0.1);
+
+    auto ln = mSceneMgr->getRootSceneNode()->createChildSceneNode();
+    ln->attachObject(directionalLight0);
+    ln->setDirection(Vector3(1, -1, 1));
    
     // Spheres
     CSGSphereSource sphere1((Real)5.0, Vector3((Real)5.5));
@@ -113,9 +116,6 @@ void Sample_VolumeCSG::setupContent(void)
 void Sample_VolumeCSG::setupControls(void)
 {
     mTrayMgr->showCursor();
-#if OGRE_PLATFORM != OGRE_PLATFORM_APPLE_IOS
-        setDragLook(true);
-#endif
     mCameraMan->setStyle(OgreBites::CS_MANUAL);
     mCameraMan->setTopSpeed((Real)25.0);
     // make room for the volume
@@ -202,31 +202,3 @@ void Sample_VolumeCSG::_shutdown()
         
     SdkSample::_shutdown();
 }
-
-//-----------------------------------------------------------------------
-
-#ifndef OGRE_STATIC_LIB
-
-static SamplePlugin* sp;
-static Sample* s;
-    
-//-----------------------------------------------------------------------
-
-extern "C" _OgreSampleExport void dllStartPlugin()
-{
-    s = new Sample_VolumeCSG();
-    sp = OGRE_NEW SamplePlugin(s->getInfo()["Title"] + " Sample");
-    sp->addSample(s);
-    Root::getSingleton().installPlugin(sp);
-}
-    
-//-----------------------------------------------------------------------
-
-extern "C" _OgreSampleExport void dllStopPlugin()
-{
-    Root::getSingleton().uninstallPlugin(sp); 
-    OGRE_DELETE sp;
-    delete s;
-}
-
-#endif

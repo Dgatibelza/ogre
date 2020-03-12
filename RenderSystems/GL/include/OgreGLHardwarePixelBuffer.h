@@ -53,8 +53,8 @@ namespace Ogre {
     {
     public:
         /** Texture constructor */
-        GLTextureBuffer(GLRenderSystem* renderSystem, const String &baseName, GLenum target, GLuint id, GLint face,
-            GLint level, Usage usage, bool writeGamma, uint fsaa);
+        GLTextureBuffer(GLRenderSystem* renderSystem, GLTexture* parent, GLint face, GLint level,
+                        uint32 mWidth, uint32 mHeight, uint32 mDepth);
         ~GLTextureBuffer();
         
         /// @copydoc GLHardwarePixelBuffer::bindToFramebuffer
@@ -85,11 +85,10 @@ namespace Ogre {
         GLenum mTarget;
         GLenum mFaceTarget; // same as mTarget in case of GL_TEXTURE_xD, but cubemap face for cubemaps
         GLuint mTextureID;
-        GLint mFace;
         GLint mLevel;
         bool mHwGamma;
 
-        typedef vector<RenderTexture*>::type SliceTRT;
+        typedef std::vector<RenderTexture*> SliceTRT;
         SliceTRT mSliceTRT;
 
         GLRenderSystem* mRenderSystem;

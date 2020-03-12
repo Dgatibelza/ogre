@@ -29,6 +29,7 @@ THE SOFTWARE.
 #define __Common_H__
 // Common stuff
 
+#include "OgreVector.h"
 #include "OgreHeaderPrefix.h"
 #include "OgreMurmurHash3.h"
 
@@ -61,27 +62,31 @@ namespace Ogre {
         others. */
     enum CompareFunction
     {
-        CMPF_ALWAYS_FAIL,
-        CMPF_ALWAYS_PASS,
-        CMPF_LESS,
-        CMPF_LESS_EQUAL,
-        CMPF_EQUAL,
-        CMPF_NOT_EQUAL,
-        CMPF_GREATER_EQUAL,
-        CMPF_GREATER
+        CMPF_ALWAYS_FAIL,  //!< Never writes a pixel to the render target
+        CMPF_ALWAYS_PASS,  //!< Always writes a pixel to the render target
+        CMPF_LESS,         //!< Write if (new_Z < existing_Z)
+        CMPF_LESS_EQUAL,   //!< Write if (new_Z <= existing_Z)
+        CMPF_EQUAL,        //!< Write if (new_Z == existing_Z)
+        CMPF_NOT_EQUAL,    //!< Write if (new_Z != existing_Z)
+        CMPF_GREATER_EQUAL,//!< Write if (new_Z >= existing_Z)
+        CMPF_GREATER       //!< Write if (new_Z >= existing_Z)
     };
 
     /** High-level filtering options providing shortcuts to settings the
         minification, magnification and mip filters. */
     enum TextureFilterOptions
     {
-        /// Equal to: min=FO_POINT, mag=FO_POINT, mip=FO_NONE
+        /// No filtering or mipmapping is used. 
+        /// Equal to: min=Ogre::FO_POINT, mag=Ogre::FO_POINT, mip=Ogre::FO_NONE
         TFO_NONE,
-        /// Equal to: min=FO_LINEAR, mag=FO_LINEAR, mip=FO_POINT
+        /// 2x2 box filtering is performed when magnifying or reducing a texture, and a mipmap is picked from the list but no filtering is done between the levels of the mipmaps. 
+        /// Equal to: min=Ogre::FO_LINEAR, mag=Ogre::FO_LINEAR, mip=Ogre::FO_POINT
         TFO_BILINEAR,
-        /// Equal to: min=FO_LINEAR, mag=FO_LINEAR, mip=FO_LINEAR
+        /// 2x2 box filtering is performed when magnifying and reducing a texture, and the closest 2 mipmaps are filtered together. 
+        /// Equal to: min=Ogre::FO_LINEAR, mag=Ogre::FO_LINEAR, mip=Ogre::FO_LINEAR
         TFO_TRILINEAR,
-        /// Equal to: min=FO_ANISOTROPIC, max=FO_ANISOTROPIC, mip=FO_LINEAR
+        /// This is the same as ’trilinear’, except the filtering algorithm takes account of the slope of the triangle in relation to the camera rather than simply doing a 2x2 pixel filter in all cases.
+        /// Equal to: min=Ogre::FO_ANISOTROPIC, max=Ogre::FO_ANISOTROPIC, mip=Ogre::FO_LINEAR
         TFO_ANISOTROPIC
     };
 
@@ -103,16 +108,37 @@ namespace Ogre {
         FO_POINT,
         /// Average of a 2x2 pixel area, denotes bilinear for MIN and MAG, trilinear for MIP
         FO_LINEAR,
-        /// Similar to FO_LINEAR, but compensates for the angle of the texture plane
+        /// Similar to FO_LINEAR, but compensates for the angle of the texture plane. Note that in
+        /// order for this to make any difference, you must also set the
+        /// TextureUnitState::setTextureAnisotropy attribute too.
         FO_ANISOTROPIC
     };
 
-    /** Light shading modes. */
+    /** Texture addressing modes - default is TAM_WRAP.
+    */
+    enum TextureAddressingMode
+    {
+        /// %Any value beyond 1.0 wraps back to 0.0. %Texture is repeated.
+        TAM_WRAP,
+        /// %Texture flips every boundary, meaning texture is mirrored every 1.0 u or v
+        TAM_MIRROR,
+        /// Values beyond 1.0 are clamped to 1.0. %Texture ’streaks’ beyond 1.0 since last line
+        /// of pixels is used across the rest of the address space. Useful for textures which
+        /// need exact coverage from 0.0 to 1.0 without the ’fuzzy edge’ wrap gives when
+        /// combined with filtering.
+        TAM_CLAMP,
+        /// %Texture coordinates outside the range [0.0, 1.0] are set to the border colour.
+        TAM_BORDER,
+        /// Unknown
+        TAM_UNKNOWN = 99
+    };
+
+    /** %Light shading modes. */
     enum ShadeOptions
     {
-        SO_FLAT,
-        SO_GOURAUD,
-        SO_PHONG
+        SO_FLAT, //!< No interpolation takes place. Each face is shaded with a single colour determined from the first vertex in the face.
+        SO_GOURAUD, //!< Colour at each vertex is linearly interpolated across the face.
+        SO_PHONG //!< Vertex normals are interpolated across the face, and these are used to determine colour at each pixel. Gives a more natural lighting effect but is more expensive and works better at high levels of tessellation. Not supported on all hardware.
     };
 
     /** Fog modes. */
@@ -176,11 +202,11 @@ namespace Ogre {
     /** The polygon mode to use when rasterising. */
     enum PolygonMode
     {
-        /// Only points are rendered.
+        /// Only the points of each polygon are rendered.
         PM_POINTS = 1,
-        /// Wireframe models are rendered.
+        /// Polygons are drawn in outline only.
         PM_WIREFRAME = 2,
-        /// Solid polygons are rendered.
+        /// The normal situation - polygons are filled in.
         PM_SOLID = 3
     };
 
@@ -211,7 +237,7 @@ namespace Ogre {
             than the additive stencil shadow approach when there are multiple
             lights, but is not an accurate model. 
         */
-        SHADOWTYPE_STENCIL_MODULATIVE = 0x12,
+        SHADOWTYPE_STENCIL_MODULATIVE = SHADOWDETAILTYPE_STENCIL | SHADOWDETAILTYPE_MODULATIVE,
         /** Stencil shadow technique which renders each light as a separate
             additive pass to the scene. This technique can be very fillrate
             intensive because it requires at least 2 passes of the entire
@@ -219,12 +245,12 @@ namespace Ogre {
             accurate model than the modulative stencil approach and this is
             especially apparent when using coloured lights or bump mapping.
         */
-        SHADOWTYPE_STENCIL_ADDITIVE = 0x11,
+        SHADOWTYPE_STENCIL_ADDITIVE = SHADOWDETAILTYPE_STENCIL | SHADOWDETAILTYPE_ADDITIVE,
         /** Texture-based shadow technique which involves a monochrome render-to-texture
             of the shadow caster and a projection of that texture onto the 
             shadow receivers as a modulative pass. 
         */
-        SHADOWTYPE_TEXTURE_MODULATIVE = 0x22,
+        SHADOWTYPE_TEXTURE_MODULATIVE = SHADOWDETAILTYPE_TEXTURE | SHADOWDETAILTYPE_MODULATIVE,
         
         /** Texture-based shadow technique which involves a render-to-texture
             of the shadow caster and a projection of that texture onto the 
@@ -234,7 +260,7 @@ namespace Ogre {
             modulative approach and this is especially apparent when using coloured lights 
             or bump mapping.
         */
-        SHADOWTYPE_TEXTURE_ADDITIVE = 0x21,
+        SHADOWTYPE_TEXTURE_ADDITIVE = SHADOWDETAILTYPE_TEXTURE | SHADOWDETAILTYPE_ADDITIVE,
 
         /** Texture-based shadow technique which involves a render-to-texture
         of the shadow caster and a projection of that texture on to the shadow
@@ -251,7 +277,7 @@ namespace Ogre {
         not mean it does the adding on your receivers automatically though, how you
         use that result is up to you.
         */
-        SHADOWTYPE_TEXTURE_ADDITIVE_INTEGRATED = 0x25,
+        SHADOWTYPE_TEXTURE_ADDITIVE_INTEGRATED = SHADOWTYPE_TEXTURE_ADDITIVE | SHADOWDETAILTYPE_INTEGRATED,
         /** Texture-based shadow technique which involves a render-to-texture
             of the shadow caster and a projection of that texture on to the shadow
             receivers, with the usage of those shadow textures completely controlled
@@ -267,7 +293,7 @@ namespace Ogre {
             not mean it modulates on your receivers automatically though, how you
             use that result is up to you.
         */
-        SHADOWTYPE_TEXTURE_MODULATIVE_INTEGRATED = 0x26
+        SHADOWTYPE_TEXTURE_MODULATIVE_INTEGRATED = SHADOWTYPE_TEXTURE_MODULATIVE | SHADOWDETAILTYPE_INTEGRATED
     };
 
     /** An enumeration describing which material properties should track the vertex colours */
@@ -345,7 +371,7 @@ namespace Ogre {
     class HashedVector
     {
     public:
-        typedef std::vector<T, STLAllocator<T, GeneralAllocPolicy> > VectorImpl;
+        typedef typename std::vector<T> VectorImpl;
     protected:
         VectorImpl mList;
         mutable uint32 mListHash;
@@ -558,14 +584,14 @@ namespace Ogre {
     /// Constant blank string, useful for returning by ref where local does not exist
     const String BLANKSTRING;
 
-    typedef map<String, bool>::type UnaryOptionList;
-    typedef map<String, String>::type BinaryOptionList;
+    typedef std::map<String, bool> UnaryOptionList;
+    typedef std::map<String, String> BinaryOptionList;
 
     /// Name / value parameter pair (first = name, second = value)
-    typedef map<String, String>::type NameValuePairList;
+    typedef std::map<String, String> NameValuePairList;
 
     /// Alias / Texture name pair (first = alias, second = texture name)
-    typedef map<String, String>::type AliasTextureNamePairList;
+    typedef std::map<String, String> AliasTextureNamePairList;
 
         template< typename T > struct TRect
         {
@@ -645,7 +671,10 @@ namespace Ogre {
               return ret;
 
           }
-
+          bool operator==(const TRect& rhs) const
+          {
+              return left == rhs.left && right == rhs.right && top == rhs.top && bottom == rhs.bottom;
+          }
         };
         template<typename T>
         std::ostream& operator<<(std::ostream& o, const TRect<T>& r)
@@ -717,7 +746,13 @@ namespace Ogre {
             {
                 assert(right >= left && bottom >= top && back >= front);
             }
-            
+
+            /// @overload
+            explicit Box(const Vector3i& size)
+                : left(0), top(0), right(size[0]), bottom(size[1]), front(0), back(size[2])
+            {
+            }
+
             /// Return true if the other box is a part of this one
             bool contains(const Box &def) const
             {
@@ -731,6 +766,11 @@ namespace Ogre {
             uint32 getHeight() const { return bottom-top; }
             /// Get the depth of this box
             uint32 getDepth() const { return back-front; }
+
+            /// origin (top, left, front) of the box
+            Vector3i getOrigin() const { return Vector3i(left, top, front); }
+            /// size (width, height, depth) of the box
+            Vector3i getSize() const { return Vector3i(getWidth(), getHeight(), getDepth()); }
         };
 
     
@@ -771,10 +811,10 @@ namespace Ogre {
     };
 
     /// Render window creation parameters container.
-    typedef vector<RenderWindowDescription>::type RenderWindowDescriptionList;
+    typedef std::vector<RenderWindowDescription> RenderWindowDescriptionList;
 
     /// Render window container.
-    typedef vector<RenderWindow*>::type RenderWindowList;
+    typedef std::vector<RenderWindow*> RenderWindowList;
 
     /** @} */
     /** @} */

@@ -27,12 +27,7 @@ THE SOFTWARE.
 */
 #include "OgreStableHeaders.h"
 #include "OgreHardwareVertexBuffer.h"
-#include "OgreColourValue.h"
-#include "OgreException.h"
-#include "OgreHardwareBufferManager.h"
 #include "OgreDefaultHardwareBufferManager.h"
-#include "OgreRoot.h"
-#include "OgreRenderSystem.h"
 
 namespace Ogre {
 
@@ -40,11 +35,11 @@ namespace Ogre {
     HardwareVertexBuffer::HardwareVertexBuffer(HardwareBufferManagerBase* mgr, size_t vertexSize,  
         size_t numVertices, HardwareBuffer::Usage usage, 
         bool useSystemMemory, bool useShadowBuffer) 
-        : HardwareBuffer(usage, useSystemMemory, useShadowBuffer), 
+        : HardwareBuffer(usage, useSystemMemory, useShadowBuffer),
+          mIsInstanceData(false),
           mMgr(mgr),
           mNumVertices(numVertices),
           mVertexSize(vertexSize),
-          mIsInstanceData(false),
           mInstanceDataStepRate(1)
     {
         // Calculate the size of the vertices
@@ -53,8 +48,8 @@ namespace Ogre {
         // Create a shadow buffer if required
         if (mUseShadowBuffer)
         {
-            mShadowBuffer = OGRE_NEW DefaultHardwareVertexBuffer(mMgr, mVertexSize, 
-                    mNumVertices, HardwareBuffer::HBU_DYNAMIC);
+            mShadowBuffer.reset(new DefaultHardwareVertexBuffer(mMgr, mVertexSize,
+                    mNumVertices, HardwareBuffer::HBU_DYNAMIC));
         }
 
     }
@@ -65,7 +60,6 @@ namespace Ogre {
         {
             mMgr->_notifyVertexBufferDestroyed(this);
         }
-        OGRE_DELETE mShadowBuffer;
     }
     //-----------------------------------------------------------------------------
     bool HardwareVertexBuffer::checkIfVertexInstanceDataIsSupported()
@@ -112,10 +106,9 @@ namespace Ogre {
     //-----------------------------------------------------------------------------
     // VertexElement
     //-----------------------------------------------------------------------------
-    VertexElement::VertexElement(unsigned short source, size_t offset, 
-        VertexElementType theType, VertexElementSemantic semantic, unsigned short index)
-        : mSource(source), mOffset(offset), mType(theType), 
-        mSemantic(semantic), mIndex(index)
+    VertexElement::VertexElement(unsigned short source, size_t offset, VertexElementType theType,
+                                 VertexElementSemantic semantic, unsigned short index)
+        : mSource(source), mIndex(index), mOffset(offset), mType(theType), mSemantic(semantic)
     {
     }
     //-----------------------------------------------------------------------------
@@ -837,13 +830,13 @@ namespace Ogre {
         mHighIndex = targetIndex;
     }
     //-----------------------------------------------------------------------------
-    bool VertexBufferBinding::getHasInstanceData() const
+    bool VertexBufferBinding::hasInstanceData() const
     {
         VertexBufferBinding::VertexBufferBindingMap::const_iterator i, iend;
         iend = mBindingMap.end();
         for (i = mBindingMap.begin(); i != iend; ++i)
         {
-            if ( i->second->getIsInstanceData() )
+            if ( i->second->isInstanceData() )
             {
                 return true;
             }

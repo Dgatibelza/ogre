@@ -10,7 +10,7 @@
 
 namespace Ogre
 {
-VertexElementSemantic GLSLProgramCommon::getAttributeSemanticEnum(String type)
+VertexElementSemantic GLSLProgramCommon::getAttributeSemanticEnum(const String& type)
 {
     size_t numAttribs = sizeof(msCustomAttributes)/sizeof(CustomAttribute);
     for (size_t i = 0; i < numAttribs; ++i)
@@ -23,14 +23,19 @@ VertexElementSemantic GLSLProgramCommon::getAttributeSemanticEnum(String type)
     return VertexElementSemantic(0);
 }
 
-GLSLProgramCommon::GLSLProgramCommon(GLSLShaderCommon* vertexShader)
-    : mVertexShader(vertexShader),
+GLSLProgramCommon::GLSLProgramCommon(const GLShaderList& shaders)
+    : mShaders(shaders),
       mUniformRefsBuilt(false),
       mGLProgramHandle(0),
-      mLinked(false),
-      mTriedToLinkAndFailed(false),
-      mSkeletalAnimation(false)
+      mLinked(false)
 {
+    // compute shader presence means no other shaders are allowed
+    if(shaders[GPT_COMPUTE_PROGRAM])
+    {
+        mShaders.fill(NULL);
+        mShaders[GPT_COMPUTE_PROGRAM] = shaders[GPT_COMPUTE_PROGRAM];
+    }
+
     // init mCustomAttributesIndexes
     for (size_t i = 0; i < VES_COUNT; i++)
     {
@@ -62,19 +67,19 @@ void GLSLProgramCommon::extractLayoutQualifiers(void)
     // Format is:
     //      layout(location = 0) attribute vec4 vertex;
 
-    if (!mVertexShader)
+    if (!mShaders[GPT_VERTEX_PROGRAM])
     {
         return;
     }
 
-    String shaderSource = mVertexShader->getSource();
+    String shaderSource = mShaders[GPT_VERTEX_PROGRAM]->getSource();
     String::size_type currPos = shaderSource.find("layout");
     while (currPos != String::npos)
     {
         VertexElementSemantic semantic;
         int index = 0;
 
-        String::size_type endPos = shaderSource.find(";", currPos);
+        String::size_type endPos = shaderSource.find(';', currPos);
         if (endPos == String::npos)
         {
             // Problem, missing semicolon, abort.
@@ -87,8 +92,8 @@ void GLSLProgramCommon::extractLayoutQualifiers(void)
         currPos += 6;
 
         // Skip until '='.
-        String::size_type eqPos = line.find("=");
-        String::size_type parenPos = line.find(")");
+        String::size_type eqPos = line.find('=');
+        String::size_type parenPos = line.find(')');
 
         // Skip past '=' up to a ')' which contains an integer(the position).
         // TODO This could be a definition, does the preprocessor do replacement?
@@ -108,38 +113,43 @@ void GLSLProgramCommon::extractLayoutQualifiers(void)
             // It should contain 3 parts, i.e. "attribute vec4 vertex".
             break;
         }
-        if (parts[0] == "out")
+        size_t attrStart = 0;
+        if (parts.size() == 4)
         {
-            // This is an output attribute, skip it
-            continue;
+            if( parts[0] == "flat" || parts[0] == "smooth"|| parts[0] == "perspective")
+            {
+                // Skip the interpolation qualifier
+                attrStart = 1;
+            }
         }
 
-        String attrName = parts[2];
-        String::size_type uvPos = attrName.find("uv");
-
-        // Special case for attribute named position.
-        if (attrName == "position")
-            semantic = getAttributeSemanticEnum("vertex");
-        else if(uvPos == 0)
-            semantic = getAttributeSemanticEnum("uv0"); // treat "uvXY" as "uv0"
-        else
-            semantic = getAttributeSemanticEnum(attrName);
-
-        // Find the texture unit index.
-        if (uvPos == 0)
+        // Skip output attribute
+        if (parts[attrStart] != "out")
         {
-            String uvIndex = attrName.substr(uvPos + 2, attrName.length() - 2);
-            index = StringConverter::parseInt(uvIndex);
-        }
+            String attrName = parts[attrStart + 2];
+            String::size_type uvPos = attrName.find("uv");
 
-        mCustomAttributesIndexes[semantic - 1][index] = attrib;
+            if(uvPos == 0)
+                semantic = getAttributeSemanticEnum("uv0"); // treat "uvXY" as "uv0"
+            else
+                semantic = getAttributeSemanticEnum(attrName);
+
+            // Find the texture unit index.
+            if (uvPos == 0)
+            {
+                String uvIndex = attrName.substr(uvPos + 2, attrName.length() - 2);
+                index = StringConverter::parseInt(uvIndex);
+            }
+
+            mCustomAttributesIndexes[semantic - 1][index] = attrib;
+        }
 
         currPos = shaderSource.find("layout", currPos);
     }
 }
 
-// Some drivers (e.g. OS X on nvidia) incorrectly determine the attribute binding automatically
-// and end up aliasing existing built-ins. So avoid! Fixed builtins are:
+// Switching attribute bindings requires re-creating VAOs. So avoid!
+// Fixed builtins (from ARB_vertex_program Table X.2) are:
 
 //  a  builtin              custom attrib name
 // ----------------------------------------------
@@ -149,6 +159,7 @@ void GLSLProgramCommon::extractLayoutQualifiers(void)
 //  3  gl_Color             colour
 //  4  gl_SecondaryColor    secondary_colour
 //  5  gl_FogCoord          n/a
+//  6  n/a                  n/a
 //  7  n/a                  blendIndices
 //  8  gl_MultiTexCoord0    uv0
 //  9  gl_MultiTexCoord1    uv1
@@ -178,31 +189,88 @@ GLSLProgramCommon::CustomAttribute GLSLProgramCommon::msCustomAttributes[17] = {
     {"binormal", getFixedAttributeIndex(VES_BINORMAL, 0), VES_BINORMAL},
 };
 
+static int32 attributeIndex[VES_COUNT + 1] = {
+        -1,// n/a
+        0, // VES_POSITION
+        1, // VES_BLEND_WEIGHTS
+        7, // VES_BLEND_INDICES
+        2, // VES_NORMAL
+        3, // VES_DIFFUSE
+        4, // VES_SPECULAR
+        8, // VES_TEXTURE_COORDINATES
+        15,// VES_BINORMAL
+        14 // VES_TANGENT
+};
+
+void GLSLProgramCommon::useTightAttributeLayout() {
+    //  a  builtin              custom attrib name
+    // ----------------------------------------------
+    //  0  gl_Vertex            vertex/ position
+    //  1  gl_Normal            normal
+    //  2  gl_Color             colour
+    //  3  gl_MultiTexCoord0    uv0
+    //  4  gl_MultiTexCoord1    uv1, blendWeights
+    //  5  gl_MultiTexCoord2    uv2, blendIndices
+    //  6  gl_MultiTexCoord3    uv3, tangent
+    //  7  gl_MultiTexCoord4    uv4, binormal
+
+    size_t numAttribs = sizeof(msCustomAttributes)/sizeof(CustomAttribute);
+    for (size_t i = 0; i < numAttribs; ++i)
+    {
+        CustomAttribute& a = msCustomAttributes[i];
+        a.attrib -= attributeIndex[a.semantic]; // only keep index (for uvXY)
+    }
+
+    attributeIndex[VES_NORMAL] = 1;
+    attributeIndex[VES_DIFFUSE] = 2;
+    attributeIndex[VES_TEXTURE_COORDINATES] = 3;
+    attributeIndex[VES_BLEND_WEIGHTS] = 4;
+    attributeIndex[VES_BLEND_INDICES] = 5;
+    attributeIndex[VES_TANGENT] = 6;
+    attributeIndex[VES_BINORMAL] = 7;
+
+    for (size_t i = 0; i < numAttribs; ++i)
+    {
+        CustomAttribute& a = msCustomAttributes[i];
+        a.attrib += attributeIndex[a.semantic];
+    }
+}
+
 int32 GLSLProgramCommon::getFixedAttributeIndex(VertexElementSemantic semantic, uint index)
 {
-    switch(semantic)
-    {
-    case VES_POSITION:
-        return 0;
-    case VES_BLEND_WEIGHTS:
-        return 1;
-    case VES_NORMAL:
-        return 2;
-    case VES_DIFFUSE:
-        return 3;
-    case VES_SPECULAR:
-        return 4;
-    case VES_BLEND_INDICES:
-        return 7;
-    case VES_TEXTURE_COORDINATES:
-        return 8 + index;
-    case VES_TANGENT:
-        return 14;
-    case VES_BINORMAL:
-        return 15;
-    default:
-        OgreAssertDbg(false, "Missing attribute!");
-        return NOT_FOUND_CUSTOM_ATTRIBUTES_INDEX;
-    };
+    OgreAssertDbg(semantic > 0 && semantic <= VES_COUNT, "Missing attribute!");
+
+    if(semantic == VES_TEXTURE_COORDINATES)
+        return attributeIndex[semantic] + index;
+
+    return attributeIndex[semantic];
 }
+
+String GLSLProgramCommon::getCombinedName()
+{
+    StringStream ss;
+
+    for(auto s : mShaders)
+    {
+        if (s)
+        {
+            ss << s->getName() << "\n";
+        }
+    }
+
+    return ss.str();
+}
+
+uint32 GLSLProgramCommon::getCombinedHash()
+{
+    uint32 hash = 0;
+
+    for (auto p : mShaders)
+    {
+        if(!p) continue;
+        hash = p->_getHash(hash);
+    }
+    return hash;
+}
+
 } /* namespace Ogre */

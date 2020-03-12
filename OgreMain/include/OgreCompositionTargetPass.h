@@ -31,6 +31,7 @@ THE SOFTWARE.
 #include "OgrePrerequisites.h"
 #include "OgreIteratorWrappers.h"
 #include "OgreHeaderPrefix.h"
+#include "OgreCompositionPass.h"
 
 namespace Ogre {
     /** \addtogroup Core
@@ -55,7 +56,7 @@ namespace Ogre {
             IM_NONE,        /// No input
             IM_PREVIOUS     /// Output of previous Composition in chain
         };
-        typedef vector<CompositionPass *>::type Passes;
+        typedef std::vector<CompositionPass *> Passes;
         typedef VectorIterator<Passes> PassIterator;
         
         /** Set input mode of this TargetPass
@@ -121,23 +122,31 @@ namespace Ogre {
         
         /** Create a new pass, and return a pointer to it.
         */
-        CompositionPass *createPass();
+        CompositionPass *createPass(CompositionPass::PassType type = CompositionPass::PT_RENDERQUAD);
         /** Remove a pass. It will also be destroyed.
         */
         void removePass(size_t idx);
         /** Get a pass.
+        @deprecated use getPasses()
         */
-        CompositionPass *getPass(size_t idx);
+        OGRE_DEPRECATED CompositionPass *getPass(size_t idx);
         /** Get the number of passes.
+        @deprecated use getPasses()
         */
-        size_t getNumPasses();
+        OGRE_DEPRECATED size_t getNumPasses();
         
+        /// Get the Passes in this TargetPass
+        const Passes& getPasses() const {
+            return mPasses;
+        }
+
         /** Remove all passes
         */
         void removeAllPasses();
     
-        /** Get an iterator over the Passes in this TargetPass. */
-        PassIterator getPassIterator(void);
+        /** Get an iterator over the Passes in this TargetPass.
+        @deprecated use getPasses() */
+        OGRE_DEPRECATED PassIterator getPassIterator(void);
         
         /** Get parent object */
         CompositionTechnique *getParent();

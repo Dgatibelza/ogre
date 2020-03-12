@@ -1,13 +1,10 @@
-void noFilter_fp (
-    in float2 uv : TEXCOORD0,
-    out float4 oColor0 : COLOR0,
+#include <HLSL_SM4Support.hlsl>
 
-    uniform sampler sOcclusion : register(s0)
-)
-{
-    oColor0 = float4(tex2D(sOcclusion, uv).xyz, 1);
-} 
+SAMPLER2D(sOcclusion, 0);
+SAMPLER2D(sMrt1, 1); // normals + depth
 
+SAMPLER2D(sAccessibility, 0);
+SAMPLER2D(sMRT2, 1); // the view space position, xyz
 
 // a very simple 4x4 box filter
 // the kernel has the following form
@@ -18,11 +15,11 @@ void noFilter_fp (
 // where x marks the fragment position and the o marks a sampling point
 void boxFilter_fp
 (
+    in float4 position : POSITION,
     in float2 screenTC : TEXCOORD0,
     
     out float4 oColor0 : COLOR0,
 
-    uniform sampler sOcclusion : register(s0),
     uniform float4 screenSize,
     uniform float farClipDistance
 )
@@ -48,12 +45,11 @@ void boxFilter_fp
 // where x marks the fragment position and the o marks a sampling point
 void smartBoxFilter_fp
 (
+    in float4 position : POSITION,
     in float2 screenTC : TEXCOORD0,
     
     out float4 oColor0 : COLOR0,
 
-    uniform sampler sMrt1 : register(s0), // normals + depth
-    uniform sampler sOcclusion : register(s1),
     uniform float4 screenSize,
     uniform float farClipDistance
 )
@@ -84,12 +80,10 @@ void smartBoxFilter_fp
 // the texture fetch count
 void crossBilateralFilterX_fp
 (
+    in float4 position : POSITION,
     in float2 uv : TEXCOORD0,
     
     out float4 oColor0 : COLOR0,
-    
-    uniform sampler sAccessibility : register(s0),
-    uniform sampler sMRT2 : register(s1), // the view space position, xyz
     
     uniform float stepX, // inverse viewport width
     uniform float cPhotometricExponent
@@ -119,12 +113,10 @@ void crossBilateralFilterX_fp
 
 void crossBilateralFilterY_fp
 (
+    in float4 position : POSITION,
     in float2 uv : TEXCOORD0,
     
     out float4 oColor0 : COLOR0,
-    
-    uniform sampler sAccessibility : register(s0),
-    uniform sampler sMRT2 : register(s1), // the view space position, xyz
     
     uniform float stepY, // inverse viewport width
     uniform float cPhotometricExponent

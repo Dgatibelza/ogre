@@ -28,11 +28,6 @@ THE SOFTWARE.
 // Ogre includes
 #include "OgreStableHeaders.h"
 
-#include "OgreResource.h"
-#include "OgreResourceManager.h"
-#include "OgreLogManager.h"
-#include "OgreException.h"
-
 namespace Ogre 
 {
     //-----------------------------------------------------------------------
@@ -40,7 +35,7 @@ namespace Ogre
         const String& group, bool isManual, ManualResourceLoader* loader)
         : mCreator(creator), mName(name), mGroup(group), mHandle(handle), 
         mLoadingState(LOADSTATE_UNLOADED), mIsBackgroundLoaded(false),
-        mSize(0), mIsManual(isManual), mLoader(loader), mStateCount(0)
+        mIsManual(isManual), mSize(0),  mLoader(loader), mStateCount(0)
     {
     }
     //-----------------------------------------------------------------------
@@ -97,7 +92,7 @@ namespace Ogre
                 {
                     // Warn that this resource is not reloadable
                     LogManager::getSingleton().stream(LML_TRIVIAL) 
-                        << "WARNING: " << mCreator->getResourceType()  
+                        << "Note: " << mCreator->getResourceType()
                         << " instance '" << mName << "' was defined as manually "
                         << "loaded, but no manual loader was provided. This Resource "
                         << "will be lost if it has to be reloaded.";
@@ -215,7 +210,7 @@ namespace Ogre
                 {
                     // Warn that this resource is not reloadable
                     LogManager::getSingleton().stream(LML_TRIVIAL) 
-                        << "WARNING: " << mCreator->getResourceType()  
+                        << "Note: " << mCreator->getResourceType()
                         << " instance '" << mName << "' was defined as manually "
                         << "loaded, but no manual loader was provided. This Resource "
                         << "will be lost if it has to be reloaded.";
@@ -278,17 +273,11 @@ namespace Ogre
     //---------------------------------------------------------------------
     size_t Resource::calculateSize(void) const
     {
-        size_t memSize = 0;
-        memSize += sizeof(ResourceManager);
-        memSize += sizeof(ManualResourceLoader);
-        memSize += sizeof(ResourceHandle);
+        size_t memSize = 0; // sizeof(*this) should be called by deriving classes
         memSize += mName.size() * sizeof(char);
         memSize += mGroup.size() * sizeof(char);
         memSize += mOrigin.size() * sizeof(char);
-        memSize += sizeof(size_t) * 2;
-        memSize += sizeof(bool) * 2;
-        memSize += sizeof(Listener) * mListenerList.size();
-        memSize += sizeof(AtomicScalar<LoadingState>);
+        memSize += sizeof(void*) * mListenerList.size();
 
         return memSize;
     }
@@ -384,10 +373,6 @@ namespace Ogre
         for (ListenerList::iterator i = mListenerList.begin();
             i != mListenerList.end(); ++i)
         {
-            // deprecated call
-            if (wasBackgroundLoaded)
-                (*i)->backgroundLoadingComplete(this);
-
             (*i)->loadingComplete(this);
         }
     }
@@ -399,12 +384,7 @@ namespace Ogre
         for (ListenerList::iterator i = mListenerList.begin();
             i != mListenerList.end(); ++i)
         {
-            // deprecated call
-            if (wasBackgroundLoaded)
-                (*i)->backgroundPreparingComplete(this);
-
             (*i)->preparingComplete(this);
-
         }
     }
     //-----------------------------------------------------------------------

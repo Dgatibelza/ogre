@@ -30,7 +30,7 @@ THE SOFTWARE.
 #define __KeyFrame_H__
 
 #include "OgrePrerequisites.h"
-#include "OgreVector3.h"
+#include "OgreVector.h"
 #include "OgreQuaternion.h"
 #include "OgreAny.h"
 #include "OgreHardwareVertexBuffer.h"
@@ -65,7 +65,7 @@ namespace Ogre
         Real getTime(void) const { return mTime; }
 
         /** Clone a keyframe (internal use only) */
-        virtual KeyFrame* _clone(AnimationTrack* newParent) const;
+        virtual KeyFrame* _clone(AnimationTrack* newParent) const OGRE_NODISCARD;
 
 
     protected:
@@ -208,7 +208,7 @@ namespace Ogre
 
             PoseRef(ushort p, Real i) : poseIndex(p), influence(i) {}
         };
-        typedef vector<PoseRef>::type PoseRefList;
+        typedef std::vector<PoseRef> PoseRefList;
 
         /** Add a new pose reference. 
         @see PoseRef
@@ -232,11 +232,13 @@ namespace Ogre
         typedef VectorIterator<PoseRefList> PoseRefIterator;
         typedef ConstVectorIterator<PoseRefList> ConstPoseRefIterator;
 
-        /** Get an iterator over the pose references. */
-        PoseRefIterator getPoseReferenceIterator(void);
+        /** Get an iterator over the pose references.
+        @deprecated use getPoseReferences() */
+        OGRE_DEPRECATED PoseRefIterator getPoseReferenceIterator(void);
 
-        /** Get a const iterator over the pose references. */
-        ConstPoseRefIterator getPoseReferenceIterator(void) const;
+        /** Get a const iterator over the pose references.
+        @deprecated use getPoseReferences() */
+        OGRE_DEPRECATED ConstPoseRefIterator getPoseReferenceIterator(void) const;
 
         /** Clone a keyframe (internal use only) */
         KeyFrame* _clone(AnimationTrack* newParent) const;

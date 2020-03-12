@@ -31,6 +31,8 @@ THE SOFTWARE.
 #include "OgreStreamSerialiser.h"
 #include "OgreLogManager.h"
 #include "OgreTerrainAutoUpdateLod.h"
+#include "OgreTerrainMaterialGeneratorA.h"
+#include <cmath>
 #include <iomanip>
 
 namespace Ogre
@@ -38,7 +40,6 @@ namespace Ogre
     const uint16 TerrainGroup::WORKQUEUE_LOAD_REQUEST = 1;
     const uint32 TerrainGroup::CHUNK_ID = StreamSerialiser::makeIdentifier("TERG");
     const uint16 TerrainGroup::CHUNK_VERSION = 1;
-    uint TerrainGroup::LoadRequest::loadingTaskNum = 0;
 
     //---------------------------------------------------------------------
     TerrainGroup::TerrainGroup(SceneManager* sm, Terrain::Alignment align, 
@@ -100,7 +101,7 @@ namespace Ogre
         }
 
         // waiting for terrain preparing finished
-        while(LoadRequest::loadingTaskNum>0)
+        while (getNumTerrainPrepareRequests() > 0)
         {
             OGRE_THREAD_SLEEP(50);
             Root::getSingleton().getWorkQueue()->processResponses();
@@ -185,7 +186,7 @@ namespace Ogre
     {
         TerrainSlot* slot = getTerrainSlot(x, y, true);
 
-        slot->freeInstance();
+        freeTerrainSlotInstance(slot);
         slot->def.useImportData();
 
         *slot->def.importData = mDefaultImportData;
@@ -209,7 +210,7 @@ namespace Ogre
     {
         TerrainSlot* slot = getTerrainSlot(x, y, true);
 
-        slot->freeInstance();
+        freeTerrainSlotInstance(slot);
         slot->def.useImportData();
 
         *slot->def.importData = mDefaultImportData;
@@ -236,7 +237,7 @@ namespace Ogre
     {
         TerrainSlot* slot = getTerrainSlot(x, y, true);
 
-        slot->freeInstance();
+        freeTerrainSlotInstance(slot);
 
         slot->def.useFilename();
         slot->def.filename = filename;
@@ -294,6 +295,72 @@ namespace Ogre
         }
 
     }
+
+    void TerrainGroup::loadLegacyTerrain(const String& cfgFilename, long x, long y, bool synchronous)
+    {
+        ConfigFile cfg;
+        cfg.loadFromResourceSystem(cfgFilename, mResourceGroup);
+        loadLegacyTerrain(cfg, x, y, synchronous);
+    }
+
+    void TerrainGroup::loadLegacyTerrain(const ConfigFile& cfg, long x, long y, bool synchronous)
+    {
+        OgreAssert(cfg.getSetting("PageSource") == "Heightmap", "only heightmap PageSource supported");
+        OgreAssert(cfg.getSetting("PageWorldZ") == cfg.getSetting("PageWorldX"), "terrain must be square");
+
+        mTerrainWorldSize = StringConverter::parseReal(cfg.getSetting("PageWorldX"));
+        mTerrainSize = StringConverter::parseInt(cfg.getSetting("PageSize"));
+
+        mAlignment = Terrain::ALIGN_X_Z;
+        mOrigin = Vector3(mTerrainWorldSize / 2, 0, mTerrainWorldSize / 2);
+
+        mDefaultImportData.inputScale = StringConverter::parseReal(cfg.getSetting("MaxHeight"));
+        mDefaultImportData.maxBatchSize = StringConverter::parseInt(cfg.getSetting("TileSize"));
+        mDefaultImportData.minBatchSize = (mDefaultImportData.maxBatchSize - 1)/2 + 1;
+
+        // copy data that would have normally happened on construction
+        mDefaultImportData.terrainAlign = mAlignment;
+        mDefaultImportData.terrainSize = mTerrainSize;
+        mDefaultImportData.worldSize = mTerrainWorldSize;
+
+        const String& worldTexName = cfg.getSetting("WorldTexture");
+        if (!worldTexName.empty())
+        {
+            const String& detailTexName = cfg.getSetting("DetailTexture");
+            OgreAssert(!detailTexName.empty(), "DetailTexture must be given");
+            Real detailTile = StringConverter::parseReal(cfg.getSetting("DetailTile"), 1);
+            mDefaultImportData.layerList.resize(1);
+            mDefaultImportData.layerList[0].worldSize =
+                (mTerrainWorldSize / mTerrainSize) * (mDefaultImportData.maxBatchSize / detailTile);
+            mDefaultImportData.layerList[0].textureNames.push_back(detailTexName);
+        }
+
+        // Load terrain from heightmap
+        Image img;
+        img.load(cfg.getSetting("Heightmap.image"), mResourceGroup);
+        defineTerrain(x, y, &img);
+
+        auto profile = dynamic_cast<TerrainMaterialGeneratorA::SM2Profile*>(
+            TerrainGlobalOptions::getSingleton().getDefaultMaterialGenerator()->getActiveProfile());
+
+        if(profile)
+        {
+            profile->setLayerSpecularMappingEnabled(false);
+            profile->setLayerNormalMappingEnabled(false);
+            profile->setLightmapEnabled(false); // baked into diffusemap
+        }
+
+        TerrainSlot* slot = getTerrainSlot(x, y, false);
+        loadTerrainImpl(slot, synchronous);
+
+        if (!worldTexName.empty())
+        {
+            img.load(worldTexName, mResourceGroup);
+            slot->instance->setGlobalColourMapEnabled(true, img.getWidth());
+            slot->instance->getGlobalColourMap()->loadImage(img);
+        }
+    }
+
     //---------------------------------------------------------------------
     void TerrainGroup::loadTerrainImpl(TerrainSlot* slot, bool synchronous)
     {
@@ -309,11 +376,14 @@ namespace Ogre
             LoadRequest req;
             req.slot = slot;
             req.origin = this;
-            ++LoadRequest::loadingTaskNum;
-            Root::getSingleton().getWorkQueue()->addRequest(
-                mWorkQueueChannel, WORKQUEUE_LOAD_REQUEST, 
-                Any(req), 0, synchronous);
-
+            std::pair<TerrainPrepareRequestMap::iterator, bool> ret = mTerrainPrepareRequests.emplace(slot, 0);
+            assert(ret.second == true);
+            WorkQueue::RequestID id =
+                Root::getSingleton().getWorkQueue()->addRequest(
+                    mWorkQueueChannel, WORKQUEUE_LOAD_REQUEST,
+                    Any(req), 0, synchronous);
+            if (!synchronous)
+                ret.first->second = id;
         }
     }
     //---------------------------------------------------------------------
@@ -365,15 +435,14 @@ namespace Ogre
         }
     }
     //---------------------------------------------------------------------
+    size_t TerrainGroup::getNumTerrainPrepareRequests() const
+    {
+        return mTerrainPrepareRequests.size();
+    }
+    //---------------------------------------------------------------------
     void TerrainGroup::unloadTerrain(long x, long y)
     {
-        TerrainSlot* slot = getTerrainSlot(x, y, false);
-        if (slot)
-        {
-            slot->freeInstance();
-        }
-
-
+        freeTerrainSlotInstance(getTerrainSlot(x, y, false));
     }
     //---------------------------------------------------------------------
     void TerrainGroup::removeTerrain(long x, long y)
@@ -615,8 +684,8 @@ namespace Ogre
         terrainPos.x += offset;
         terrainPos.y += offset;
 
-        *x = static_cast<long>(floor(terrainPos.x / mTerrainWorldSize));
-        *y = static_cast<long>(floor(terrainPos.y / mTerrainWorldSize));
+        *x = static_cast<long>(std::floor(terrainPos.x / mTerrainWorldSize));
+        *y = static_cast<long>(std::floor(terrainPos.y / mTerrainWorldSize));
 
 
     }
@@ -698,9 +767,25 @@ namespace Ogre
     //---------------------------------------------------------------------
     void TerrainGroup::handleResponse(const WorkQueue::Response* res, const WorkQueue* srcQ)
     {
+        // Data was already deleted so nothing we can do anymore.
+        if (res->getRequest()->getAborted())
+            return;
+
         // No response data, just request
         LoadRequest lreq = any_cast<LoadRequest>(res->getRequest()->getData());
-        --LoadRequest::loadingTaskNum;
+
+        TerrainPrepareRequestMap::iterator it = mTerrainPrepareRequests.find(lreq.slot);
+
+        // This slot was scheduled to be deleted.
+        if (it == mTerrainPrepareRequests.end())
+        {
+            freeTerrainSlotInstance(lreq.slot);
+            return;
+        }
+        else
+        {
+            mTerrainPrepareRequests.erase(it);
+        }
 
         if (res->succeeded())
         {
@@ -736,7 +821,7 @@ namespace Ogre
             LogManager::getSingleton().stream(LML_CRITICAL) <<
                 "We failed to prepare the terrain at (" << lreq.slot->x << ", " <<
                 lreq.slot->y <<") with the error '" << res->getMessages() << "'";
-            lreq.slot->freeInstance();
+            freeTerrainSlotInstance(lreq.slot);
         }
 
     }
@@ -823,6 +908,29 @@ namespace Ogre
         else
             return 0;
 
+    }
+    //---------------------------------------------------------------------
+    void TerrainGroup::freeTerrainSlotInstance(TerrainSlot* slot)
+    {
+        if (!slot)
+            return;
+
+        TerrainPrepareRequestMap::iterator it = mTerrainPrepareRequests.find(slot);
+
+        // Terrain was in load request so we need to schedule the deletion see handleResponse().
+        if (it != mTerrainPrepareRequests.end())
+        {
+            WorkQueue::RequestID id = it->second;
+            mTerrainPrepareRequests.erase(it);
+
+            // We can free immediately since this slot was aborted before it could've been processed.
+            if (Root::getSingleton().getWorkQueue()->abortPendingRequest(id))
+                slot->freeInstance();
+        }
+        else
+        {
+            slot->freeInstance();
+        }
     }
     //---------------------------------------------------------------------
     void TerrainGroup::freeTemporaryResources()
@@ -922,8 +1030,7 @@ namespace Ogre
     void TerrainGroup::loadGroupDefinition(StreamSerialiser& ser)
     {
         if (!ser.readChunkBegin(CHUNK_ID, CHUNK_VERSION))
-            OGRE_EXCEPT(Exception::ERR_ITEM_NOT_FOUND, 
-                "Stream does not contain TerrainGroup data", __FUNCTION__);
+            OGRE_EXCEPT(Exception::ERR_ITEM_NOT_FOUND, "Stream does not contain TerrainGroup data");
 
         // Base details
         ser.read(&mAlignment);

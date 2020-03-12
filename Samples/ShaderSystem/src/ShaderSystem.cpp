@@ -33,29 +33,6 @@ const String MESH_ARRAY[MESH_ARRAY_SIZE] =
     "knot.mesh"
 };
 
-#ifndef OGRE_STATIC_LIB
-
-static SamplePlugin* sp;
-static Sample* s;
-
-//-----------------------------------------------------------------------
-extern "C" _OgreSampleExport void dllStartPlugin()
-{
-    s = new Sample_ShaderSystem;
-    sp = OGRE_NEW SamplePlugin(s->getInfo()["Title"] + " Sample");
-    sp->addSample(s);
-    Root::getSingleton().installPlugin(sp);
-}
-//-----------------------------------------------------------------------
-extern "C" _OgreSampleExport void dllStopPlugin()
-{
-    Root::getSingleton().uninstallPlugin(sp); 
-    OGRE_DELETE sp;
-    delete s;
-}
-#endif
-
-
 //-----------------------------------------------------------------------
 Sample_ShaderSystem::Sample_ShaderSystem() :
     mLayeredBlendingEntity(NULL)
@@ -245,15 +222,7 @@ void Sample_ShaderSystem::sliderMoved(Slider* slider)
 
 //-----------------------------------------------------------------------
 bool Sample_ShaderSystem::frameRenderingQueued( const FrameEvent& evt )
-{   
-    if (mSceneMgr->hasLight(SPOT_LIGHT_NAME))
-    {
-        Light* light = mSceneMgr->getLight(SPOT_LIGHT_NAME);
-
-        light->setPosition(mCamera->getDerivedPosition() + mCamera->getDerivedUp() * 20.0);
-        light->setDirection(mCamera->getDerivedDirection());
-    }
-
+{
     if (mPointLightNode != NULL)
     {
         static Real sToatalTime = 0.0;
@@ -410,8 +379,7 @@ void Sample_ShaderSystem::setupContent()
         RTShader::RenderState* pMainRenderState =
             RTShader::ShaderGenerator::getSingleton().createOrRetrieveRenderState(Ogre::RTShader::ShaderGenerator::DEFAULT_SCHEME_NAME).first;
         pMainRenderState->addTemplateSubRenderState(
-            Ogre::RTShader::ShaderGenerator::getSingleton().createSubRenderState(
-            Ogre::RTShader::TextureAtlasSampler::Type));
+            mShaderGenerator->createSubRenderState<RTShader::TextureAtlasSampler>());
 
         // Create texture atlas object and node
         ManualObject* atlasObject = createTextureAtlasObject();
@@ -530,8 +498,7 @@ void Sample_ShaderSystem::setupUI()
     // Allow reflection map only on PS3 and above since with all lights on + specular + bump we 
     // exceed the instruction count limits of PS2.
     if (GpuProgramManager::getSingleton().isSyntaxSupported("ps_3_0") ||
-        GpuProgramManager::getSingleton().isSyntaxSupported("glsles") ||
-        GpuProgramManager::getSingleton().isSyntaxSupported("fp30"))
+        !GpuProgramManager::getSingleton().isSyntaxSupported("ps_2_0"))
     {
         mTrayMgr->createCheckBox(TL_BOTTOM, REFLECTIONMAP_BOX, "Reflection Map", 240)->setChecked(mReflectionMapEnable);
         mReflectionPowerSlider = mTrayMgr->createThickSlider(TL_BOTTOM, REFLECTIONMAP_POWER_SLIDER, "Reflection Power", 240, 80, 0, 1, 100);
@@ -648,9 +615,7 @@ void Sample_ShaderSystem::setPerPixelFogEnable( bool enable )
         // Create the fog sub render state if need to.
         if (fogSubRenderState == NULL)
         {           
-            SubRenderState* subRenderState = mShaderGenerator->createSubRenderState(FFPFog::Type);
-            
-            fogSubRenderState = static_cast<FFPFog*>(subRenderState);
+            fogSubRenderState = mShaderGenerator->createSubRenderState<FFPFog>();
             schemRenderState->addTemplateSubRenderState(fogSubRenderState);
         }
             
@@ -740,7 +705,7 @@ void Sample_ShaderSystem::generateShaders(Entity* entity)
 #ifdef RTSHADER_SYSTEM_BUILD_CORE_SHADERS
             if (mCurLightingModel == SSLM_PerVertexLighting)
             {
-                RTShader::SubRenderState* perPerVertexLightModel = mShaderGenerator->createSubRenderState(RTShader::FFPLighting::Type);
+                RTShader::SubRenderState* perPerVertexLightModel = mShaderGenerator->createSubRenderState<RTShader::FFPLighting>();
 
                 renderState->addTemplateSubRenderState(perPerVertexLightModel); 
             }
@@ -749,7 +714,7 @@ void Sample_ShaderSystem::generateShaders(Entity* entity)
 #ifdef RTSHADER_SYSTEM_BUILD_EXT_SHADERS
             else if (mCurLightingModel == SSLM_PerPixelLighting)
             {
-                RTShader::SubRenderState* perPixelLightModel = mShaderGenerator->createSubRenderState(RTShader::PerPixelLighting::Type);
+                RTShader::SubRenderState* perPixelLightModel = mShaderGenerator->createSubRenderState<RTShader::PerPixelLighting>();
                 
                 renderState->addTemplateSubRenderState(perPixelLightModel);             
             }
@@ -758,8 +723,7 @@ void Sample_ShaderSystem::generateShaders(Entity* entity)
                 // Apply normal map only on main entity.
                 if (entity->getName() == MAIN_ENTITY_NAME)
                 {
-                    RTShader::SubRenderState* subRenderState = mShaderGenerator->createSubRenderState(RTShader::NormalMapLighting::Type);
-                    RTShader::NormalMapLighting* normalMapSubRS = static_cast<RTShader::NormalMapLighting*>(subRenderState);
+                    RTShader::NormalMapLighting* normalMapSubRS = mShaderGenerator->createSubRenderState<RTShader::NormalMapLighting>();
                     
                     normalMapSubRS->setNormalMapSpace(RTShader::NormalMapLighting::NMS_TANGENT);
                     normalMapSubRS->setNormalMapTextureName("Panels_Normal_Tangent.png");   
@@ -770,7 +734,7 @@ void Sample_ShaderSystem::generateShaders(Entity* entity)
                 // It is secondary entity -> use simple per pixel lighting.
                 else
                 {
-                    RTShader::SubRenderState* perPixelLightModel = mShaderGenerator->createSubRenderState(RTShader::PerPixelLighting::Type);
+                    RTShader::SubRenderState* perPixelLightModel = mShaderGenerator->createSubRenderState<RTShader::PerPixelLighting>();
                     renderState->addTemplateSubRenderState(perPixelLightModel);
                 }               
             }
@@ -779,8 +743,7 @@ void Sample_ShaderSystem::generateShaders(Entity* entity)
                 // Apply normal map only on main entity.
                 if (entity->getName() == MAIN_ENTITY_NAME)
                 {
-                    RTShader::SubRenderState* subRenderState = mShaderGenerator->createSubRenderState(RTShader::NormalMapLighting::Type);
-                    RTShader::NormalMapLighting* normalMapSubRS = static_cast<RTShader::NormalMapLighting*>(subRenderState);
+                    RTShader::NormalMapLighting* normalMapSubRS = mShaderGenerator->createSubRenderState<RTShader::NormalMapLighting>();
                 
                     normalMapSubRS->setNormalMapSpace(RTShader::NormalMapLighting::NMS_OBJECT);
                     normalMapSubRS->setNormalMapTextureName("Panels_Normal_Obj.png");   
@@ -791,7 +754,7 @@ void Sample_ShaderSystem::generateShaders(Entity* entity)
                 // It is secondary entity -> use simple per pixel lighting.
                 else
                 {
-                    RTShader::SubRenderState* perPixelLightModel = mShaderGenerator->createSubRenderState(RTShader::PerPixelLighting::Type);
+                    RTShader::SubRenderState* perPixelLightModel = mShaderGenerator->createSubRenderState<RTShader::PerPixelLighting>();
                     renderState->addTemplateSubRenderState(perPixelLightModel);
                 }               
             }
@@ -838,12 +801,12 @@ void Sample_ShaderSystem::createDirectionalLight()
     dir.y = -1.0;
     dir.z = 0.3;
     dir.normalise();
-    light->setDirection(dir);
     light->setDiffuseColour(0.65, 0.15, 0.15);
     light->setSpecularColour(0.5, 0.5, 0.5);
 
     // create pivot node
     mDirectionalLightNode = mSceneMgr->getRootSceneNode()->createChildSceneNode();
+    mDirectionalLightNode->setDirection(dir);
 
     // Create billboard set.
     mBbsFlare = mSceneMgr->createBillboardSet();
@@ -859,16 +822,10 @@ void Sample_ShaderSystem::createDirectionalLight()
 void Sample_ShaderSystem::createPointLight()
 {
     Light*  light;
-    Vector3 dir;
 
     light = mSceneMgr->createLight(POINT_LIGHT_NAME);
     light->setType(Light::LT_POINT);
     light->setCastShadows(false);
-    dir.x = 0.5;
-    dir.y = 0.0;
-    dir.z = 0.0f;
-    dir.normalise();
-    light->setDirection(dir);
     light->setDiffuseColour(0.15, 0.65, 0.15);
     light->setSpecularColour(0.5, 0.5, 0.5);    
     light->setAttenuation(200.0, 1.0, 0.0005, 0.0);
@@ -885,27 +842,25 @@ void Sample_ShaderSystem::createPointLight()
     bbs->setCastShadows(false);
 
     mPointLightNode->attachObject(bbs);
-    mPointLightNode->createChildSceneNode(Vector3(200, 100, 0))->attachObject(light);
+    SceneNode* ln = mPointLightNode->createChildSceneNode(Vector3(200, 100, 0));
+    ln->attachObject(light);
+    ln->setDirection(1, 0, 0);
 }
 
 //-----------------------------------------------------------------------
 void Sample_ShaderSystem::createSpotLight()
 {
     Light*  light;
-    Vector3 dir;
-
     light = mSceneMgr->createLight(SPOT_LIGHT_NAME);
     light->setType(Light::LT_SPOTLIGHT);
     light->setCastShadows(false);
-    dir.x = 0.0;
-    dir.y = 0.0;
-    dir.z = -1.0f;
-    dir.normalise();    
     light->setSpotlightRange(Degree(20.0), Degree(25.0), 0.95);
-    light->setDirection(dir);
     light->setDiffuseColour(0.15, 0.15, 0.65);
     light->setSpecularColour(0.5, 0.5, 0.5);    
     light->setAttenuation(1000.0, 1.0, 0.0005, 0.0);
+
+    auto ln = mCameraNode->createChildSceneNode(Vector3::UNIT_Y * 20);
+    ln->attachObject(light);
 }
 
 void Sample_ShaderSystem::addModelToScene(const String &  modelName)
@@ -1019,13 +974,7 @@ void Sample_ShaderSystem::updateLightState(const String& lightName, bool visible
         // toggle its visibility and billboard set visibility.
         else if (lightName == DIRECTIONAL_LIGHT_NAME)
         {
-            SceneNode::ObjectIterator it = mDirectionalLightNode->getAttachedObjectIterator();
-
-            while (it.hasMoreElements())  
-            {
-                MovableObject* o = it.getNext();
-                o->setVisible(visible);
-            }
+            mDirectionalLightNode->setVisible(visible, false);
         }
 
         // Spot light has no scene node representation.
@@ -1036,7 +985,7 @@ void Sample_ShaderSystem::updateLightState(const String& lightName, bool visible
 
         RenderState* schemRenderState = mShaderGenerator->getRenderState(RTShader::ShaderGenerator::DEFAULT_SCHEME_NAME);
         
-        int lightCount[3] = {0};
+        Vector3i lightCount(0, 0, 0);
 
         // Update point light count.
         if (mSceneMgr->getLight(POINT_LIGHT_NAME)->isVisible())
@@ -1078,18 +1027,12 @@ void Sample_ShaderSystem::applyShadowType(int menuIndex)
         mSceneMgr->setShadowTechnique(SHADOWTYPE_NONE);
 
 #ifdef RTSHADER_SYSTEM_BUILD_EXT_SHADERS
-        const Ogre::RTShader::SubRenderStateList& subRenderStateList = schemRenderState->getTemplateSubRenderStateList();
-        Ogre::RTShader::SubRenderStateListConstIterator it = subRenderStateList.begin();
-        Ogre::RTShader::SubRenderStateListConstIterator itEnd = subRenderStateList.end();
-
-        for (; it != itEnd; ++it)
+        for (auto srs : schemRenderState->getTemplateSubRenderStateList())
         {
-            Ogre::RTShader::SubRenderState* curSubRenderState = *it;
-
             // This is the pssm3 sub render state -> remove it.
-            if (curSubRenderState->getType() == Ogre::RTShader::IntegratedPSSM3::Type)
+            if (dynamic_cast<RTShader::IntegratedPSSM3*>(srs))
             {
-                schemRenderState->removeTemplateSubRenderState(*it);
+                schemRenderState->removeTemplateSubRenderState(srs);
                 break;
             }
         }
@@ -1127,16 +1070,14 @@ void Sample_ShaderSystem::applyShadowType(int menuIndex)
         mDirLightCheckBox->hide();
         mPointLightCheckBox->hide();
         mSpotLightCheckBox->hide();
-        
-        
-        // Set up caster material - this is just a standard depth/shadow map caster
-        mSceneMgr->setShadowTextureCasterMaterial("PSSM/shadow_caster");
-        
-        
+
         // Disable fog on the caster pass.
         MaterialPtr passCaterMaterial = MaterialManager::getSingleton().getByName("PSSM/shadow_caster");
         Pass* pssmCasterPass = passCaterMaterial->getTechnique(0)->getPass(0);
         pssmCasterPass->setFog(true);
+
+        // Set up caster material - this is just a standard depth/shadow map caster
+        mSceneMgr->setShadowTextureCasterMaterial(passCaterMaterial);
 
         // shadow camera setup
         PSSMShadowCameraSetup* pssmSetup = new PSSMShadowCameraSetup();
@@ -1149,17 +1090,8 @@ void Sample_ShaderSystem::applyShadowType(int menuIndex)
         mSceneMgr->setShadowCameraSetup(ShadowCameraSetupPtr(pssmSetup));
 
     
-        Ogre::RTShader::SubRenderState* subRenderState = mShaderGenerator->createSubRenderState(Ogre::RTShader::IntegratedPSSM3::Type); 
-        Ogre::RTShader::IntegratedPSSM3* pssm3SubRenderState = static_cast<Ogre::RTShader::IntegratedPSSM3*>(subRenderState);
-        const PSSMShadowCameraSetup::SplitPointList& srcSplitPoints = pssmSetup->getSplitPoints();
-        Ogre::RTShader::IntegratedPSSM3::SplitPointList dstSplitPoints;
-
-        for (unsigned int i=0; i < srcSplitPoints.size(); ++i)
-        {
-            dstSplitPoints.push_back(srcSplitPoints[i]);
-        }
-
-        pssm3SubRenderState->setSplitPoints(dstSplitPoints);
+        auto subRenderState = mShaderGenerator->createSubRenderState<RTShader::IntegratedPSSM3>();
+        subRenderState->setSplitPoints(pssmSetup->getSplitPoints());
         schemRenderState->addTemplateSubRenderState(subRenderState);        
     }
 #endif
@@ -1200,24 +1132,8 @@ void Sample_ShaderSystem::exportRTShaderSystemMaterial(const String& fileName, c
 }
 
 //-----------------------------------------------------------------------
-Ogre::StringVector Sample_ShaderSystem::getRequiredPlugins()
-{
-    StringVector names;
-    if (!GpuProgramManager::getSingleton().isSyntaxSupported("glsles") &&
-        !GpuProgramManager::getSingleton().isSyntaxSupported("glsl"))
-        names.push_back("Cg Program Manager");
-    return names;
-}
-
-//-----------------------------------------------------------------------
 void Sample_ShaderSystem::testCapabilities( const RenderSystemCapabilities* caps )
 {
-    if (!caps->hasCapability(RSC_VERTEX_PROGRAM) || !(caps->hasCapability(RSC_FRAGMENT_PROGRAM)))
-    {
-        OGRE_EXCEPT(Exception::ERR_NOT_IMPLEMENTED, "Your graphics card does not support vertex and fragment programs, "
-            "so you cannot run this sample. Sorry!", "Sample_ShaderSystem::testCapabilities");
-    }
-
     // Check if D3D10 shader is supported - is so - then we are OK.
     if (GpuProgramManager::getSingleton().isSyntaxSupported("ps_4_0"))
     {
@@ -1607,7 +1523,7 @@ void Sample_ShaderSystem::createInstancedViewports()
     }
 
     Ogre::Vector2 monitorCount(2.0, 2.0);
-    mInstancedViewportsSubRenderState = mShaderGenerator->createSubRenderState(Ogre::RTShader::ShaderExInstancedViewports::Type);
+    mInstancedViewportsSubRenderState = mShaderGenerator->createSubRenderState<RTShader::ShaderExInstancedViewports>();
     Ogre::RTShader::ShaderExInstancedViewports* shaderExInstancedViewports 
         = static_cast<Ogre::RTShader::ShaderExInstancedViewports*>(mInstancedViewportsSubRenderState);
     shaderExInstancedViewports->setMonitorsCount(monitorCount);

@@ -66,8 +66,8 @@ namespace Ogre {
             //Texture definition being a reference is determined by these two fields not being empty.
             String refCompName; //If a reference, the name of the compositor being referenced
             String refTexName;  //If a reference, the name of the texture in the compositor being referenced
-            size_t width;       // 0 means adapt to target width
-            size_t height;      // 0 means adapt to target height
+            uint32 width;       // 0 means adapt to target width
+            uint32 height;      // 0 means adapt to target height
             float widthFactor;  // multiple of target width to use (if width = 0)
             float heightFactor; // multiple of target height to use (if height = 0)
             PixelFormatList formatList; // more than one means MRT
@@ -81,9 +81,9 @@ namespace Ogre {
                 fsaa(true), hwGammaWrite(false), depthBufferId(1), pooled(false), scope(TS_LOCAL) {}
         };
         /// Typedefs for several iterators
-        typedef vector<CompositionTargetPass *>::type TargetPasses;
+        typedef std::vector<CompositionTargetPass *> TargetPasses;
         typedef VectorIterator<TargetPasses> TargetPassIterator;
-        typedef vector<TextureDefinition*>::type TextureDefinitions;
+        typedef std::vector<TextureDefinition*> TextureDefinitions;
         typedef VectorIterator<TextureDefinitions> TextureDefinitionIterator;
         
         /** Create a new local texture definition, and return a pointer to it.
@@ -96,6 +96,7 @@ namespace Ogre {
         void removeTextureDefinition(size_t idx);
         
         /** Get a local texture definition.
+        @deprecated use getTextureDefinitions()
         */
         TextureDefinition *getTextureDefinition(size_t idx);
         
@@ -104,15 +105,19 @@ namespace Ogre {
         TextureDefinition *getTextureDefinition(const String& name);
 
         /** Get the number of local texture definitions.
+        @deprecated use getTextureDefinitions()
         */
-        size_t getNumTextureDefinitions();
+        OGRE_DEPRECATED size_t getNumTextureDefinitions();
         
         /** Remove all Texture Definitions
         */
         void removeAllTextureDefinitions();
         
-        /** Get an iterator over the TextureDefinitions in this Technique. */
-        TextureDefinitionIterator getTextureDefinitionIterator(void);
+        /** Get the TextureDefinitions in this Technique. */
+        const TextureDefinitions& getTextureDefinitions() const { return mTextureDefinitions; }
+
+        /// @deprecated use getTextureDefinitions()
+        OGRE_DEPRECATED TextureDefinitionIterator getTextureDefinitionIterator(void);
         
         /** Create a new target pass, and return a pointer to it.
         */
@@ -123,19 +128,24 @@ namespace Ogre {
         void removeTargetPass(size_t idx);
         
         /** Get a target pass.
+        @deprecated use getTargetPasses()
         */
-        CompositionTargetPass *getTargetPass(size_t idx);
+        OGRE_DEPRECATED CompositionTargetPass *getTargetPass(size_t idx);
         
         /** Get the number of target passes.
+        @deprecated use getTargetPasses()
         */
-        size_t getNumTargetPasses();
+        OGRE_DEPRECATED size_t getNumTargetPasses();
         
         /** Remove all target passes.
         */
         void removeAllTargetPasses();
         
-        /** Get an iterator over the TargetPasses in this Technique. */
-        TargetPassIterator getTargetPassIterator(void);
+        /** Get the TargetPasses in this Technique. */
+        const TargetPasses& getTargetPasses() const { return mTargetPasses; }
+
+        /// @deprecated use getTargetPasses()
+        OGRE_DEPRECATED TargetPassIterator getTargetPassIterator(void);
         
         /** Get output (final) target pass
          */

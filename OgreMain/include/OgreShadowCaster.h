@@ -134,10 +134,10 @@ namespace Ogre {
         /** Gets the world space bounding box of the dark cap, as extruded using the light provided. */
         virtual const AxisAlignedBox& getDarkCapBounds(const Light& light, Real dirLightExtrusionDist) const = 0;
 
-        typedef vector<ShadowRenderable*>::type ShadowRenderableList;
+        typedef std::vector<ShadowRenderable*> ShadowRenderableList;
         typedef VectorIterator<ShadowRenderableList> ShadowRenderableListIterator;
 
-        /** Gets an iterator over the renderables required to render the shadow volume. 
+        /** Gets an list of the renderables required to render the shadow volume.
         @remarks
             Shadowable geometry should ideally be designed such that there is only one
             ShadowRenderable required to render the the shadow; however this is not a necessary
@@ -149,6 +149,10 @@ namespace Ogre {
         @param indexBuffer
             The index buffer to build the renderables into, 
             the current contents are assumed to be disposable.
+        @param indexBufferUsedSize
+            If the rest of buffer is enough than it would be locked with
+            HBL_NO_OVERWRITE semantic and indexBufferUsedSize would be increased,
+            otherwise HBL_DISCARD would be used and indexBufferUsedSize would be reset.
         @param extrudeVertices
             If @c true, this means this class should extrude
             the vertices of the back of the volume in software. If false, it
@@ -158,10 +162,26 @@ namespace Ogre {
         @param flags
             Technique-specific flags, see ShadowRenderableFlags.
         */
+        virtual const ShadowRenderableList& getShadowVolumeRenderableList(ShadowTechnique shadowTechnique, const Light* light,
+                                                                   HardwareIndexBufferSharedPtr* indexBuffer,
+                                                                   size_t* indexBufferUsedSize, bool extrudeVertices,
+                                                                   Real extrusionDistance, unsigned long flags = 0)
+        {
+            static ShadowRenderableList tmp;
+            auto itw = getShadowVolumeRenderableIterator(shadowTechnique, light, indexBuffer, indexBufferUsedSize,
+                                                         extrudeVertices, extrusionDistance, flags);
+            return tmp = ShadowRenderableList(itw.begin(), itw.end());
+        }
+
+        /// @deprecated use getShadowVolumeRenderableList()
         virtual ShadowRenderableListIterator getShadowVolumeRenderableIterator(
-            ShadowTechnique shadowTechnique, const Light* light, 
+            ShadowTechnique shadowTechnique, const Light* light,
             HardwareIndexBufferSharedPtr* indexBuffer, size_t* indexBufferUsedSize,
-            bool extrudeVertices, Real extrusionDistance, unsigned long flags = 0 ) = 0;
+            bool extrudeVertices, Real extrusionDistance, unsigned long flags = 0 )
+        {
+            static ShadowRenderableList lst;
+            return ShadowRenderableListIterator(lst.begin(), lst.end());
+        }
 
         /** Common implementation of releasing shadow renderables.*/
         static void clearShadowRenderableList(ShadowRenderableList& shadowRenderables);
@@ -194,8 +214,6 @@ namespace Ogre {
         /** Get the distance to extrude for a point/spot light. */
         virtual Real getPointExtrusionDistance(const Light* l) const = 0;
     protected:
-        /// Helper method for calculating extrusion distance.
-        Real getExtrusionDistance(const Vector3& objectPos, const Light* light) const;
         /** Tells the caster to perform the tasks necessary to update the 
             edge data's light listing. Can be overridden if the subclass needs 
             to do additional things. 

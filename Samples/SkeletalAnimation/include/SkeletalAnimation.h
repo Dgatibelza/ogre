@@ -123,9 +123,6 @@ public:
     {
         for (int i = 0; i < NUM_MODELS; i++)
         {
-            // update sneaking animation based on speed
-            mAnimStates[i]->addTime(mAnimSpeeds[i] * evt.timeSinceLastFrame);
-
             if (mAnimStates[i]->getTimePosition() >= ANIM_CHOP)   // when it's time to loop...
             {
                 /* We need reposition the scene node origin, since the animation includes translation.
@@ -155,27 +152,22 @@ protected:
     {
 
 #if defined(INCLUDE_RTSHADER_SYSTEM) && defined(RTSHADER_SYSTEM_BUILD_EXT_SHADERS)
-        // RTSS currently unable to generate shader for GLSLES and HLSL
-        if (mShaderGenerator->getTargetLanguage() != "glsles" &&
-                mShaderGenerator->getTargetLanguage() != "hlsl")
-        {
-            // Make this viewport work with shader generator scheme.
-            mShaderGenerator->invalidateScheme(Ogre::RTShader::ShaderGenerator::DEFAULT_SCHEME_NAME);
-            mViewport->setMaterialScheme(RTShader::ShaderGenerator::DEFAULT_SCHEME_NAME);
+        // Make this viewport work with shader generator scheme.
+        mShaderGenerator->invalidateScheme(Ogre::RTShader::ShaderGenerator::DEFAULT_SCHEME_NAME);
+        mViewport->setMaterialScheme(RTShader::ShaderGenerator::DEFAULT_SCHEME_NAME);
 
-            //Add the hardware skinning to the shader generator default render state
-            mSrsHardwareSkinning = mShaderGenerator->createSubRenderState(Ogre::RTShader::HardwareSkinning::Type);
-            Ogre::RTShader::RenderState* renderState = mShaderGenerator->getRenderState(Ogre::RTShader::ShaderGenerator::DEFAULT_SCHEME_NAME);
-            renderState->addTemplateSubRenderState(mSrsHardwareSkinning);
-            
-            Ogre::MaterialPtr pCast1 = Ogre::MaterialManager::getSingleton().getByName("Ogre/RTShader/shadow_caster_dq_skinning_1weight");
-            Ogre::MaterialPtr pCast2 = Ogre::MaterialManager::getSingleton().getByName("Ogre/RTShader/shadow_caster_dq_skinning_2weight");
-            Ogre::MaterialPtr pCast3 = Ogre::MaterialManager::getSingleton().getByName("Ogre/RTShader/shadow_caster_dq_skinning_3weight");
-            Ogre::MaterialPtr pCast4 = Ogre::MaterialManager::getSingleton().getByName("Ogre/RTShader/shadow_caster_dq_skinning_4weight");
+        //Add the hardware skinning to the shader generator default render state
+        mSrsHardwareSkinning = mShaderGenerator->createSubRenderState<RTShader::HardwareSkinning>();
+        Ogre::RTShader::RenderState* renderState = mShaderGenerator->getRenderState(Ogre::RTShader::ShaderGenerator::DEFAULT_SCHEME_NAME);
+        renderState->addTemplateSubRenderState(mSrsHardwareSkinning);
 
-            Ogre::RTShader::HardwareSkinningFactory::getSingleton().setCustomShadowCasterMaterials(
-                Ogre::RTShader::ST_DUAL_QUATERNION, pCast1, pCast2, pCast3, pCast4);
-        }
+        Ogre::MaterialPtr pCast1 = Ogre::MaterialManager::getSingleton().getByName("Ogre/RTShader/shadow_caster_dq_skinning_1weight");
+        Ogre::MaterialPtr pCast2 = Ogre::MaterialManager::getSingleton().getByName("Ogre/RTShader/shadow_caster_dq_skinning_2weight");
+        Ogre::MaterialPtr pCast3 = Ogre::MaterialManager::getSingleton().getByName("Ogre/RTShader/shadow_caster_dq_skinning_3weight");
+        Ogre::MaterialPtr pCast4 = Ogre::MaterialManager::getSingleton().getByName("Ogre/RTShader/shadow_caster_dq_skinning_4weight");
+
+        Ogre::RTShader::HardwareSkinningFactory::getSingleton().setCustomShadowCasterMaterials(
+            Ogre::RTShader::ST_DUAL_QUATERNION, pCast1, pCast2, pCast3, pCast4);
 #endif
         // set shadow properties
         mSceneMgr->setShadowTechnique(SHADOWTYPE_TEXTURE_MODULATIVE);
@@ -201,7 +193,6 @@ protected:
         SceneNode* ln = mSceneMgr->getRootSceneNode()->createChildSceneNode(pos);
         ln->attachObject(l);
         l->setType(Light::LT_SPOTLIGHT);
-        l->setDirection(Vector3::NEGATIVE_UNIT_Z);
         ln->setDirection(-pos);
         l->setDiffuseColour(0.0, 0.0, 0.5);
         bbs->createBillboard(pos)->setColour(l->getDiffuseColour());
@@ -210,7 +201,6 @@ protected:
         // add a green spotlight.
         l = mSceneMgr->createLight();
         l->setType(Light::LT_SPOTLIGHT);
-        l->setDirection(Vector3::NEGATIVE_UNIT_Z);
         pos = Vector3(0, 150, -100);
         ln = mSceneMgr->getRootSceneNode()->createChildSceneNode(pos);
         ln->attachObject(l);
@@ -229,8 +219,9 @@ protected:
         mSceneMgr->getRootSceneNode()->attachObject(floor);
 
         // set camera initial transform and speed
-        mCameraNode->setPosition(100, 20, 0);
-        mCameraNode->lookAt(Vector3(0, 10, 0), Node::TS_PARENT);
+        mCameraMan->setStyle(CS_ORBIT);
+        mTrayMgr->showCursor();
+        mCameraMan->setYawPitchDist(Degree(0), Degree(25), 100);
         mCameraMan->setTopSpeed(50);
 
         setupModels();
@@ -244,6 +235,14 @@ protected:
         Entity* ent = NULL;
         AnimationState* as = NULL;
 
+        // make sure we can get the buffers for bbox calculations
+        MeshManager::getSingleton().load("jaiqua.mesh",
+                                         ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME,
+                                         HardwareBuffer::HBU_DYNAMIC_WRITE_ONLY,
+                                         HardwareBuffer::HBU_DYNAMIC_WRITE_ONLY, true, true);
+
+        auto& controllerMgr = ControllerManager::getSingleton();
+
         for (int i = 0; i < NUM_MODELS; i++)
         {
             // create scene nodes for the models at regular angular intervals
@@ -254,41 +253,17 @@ protected:
 
             // create and attach a jaiqua entity
             ent = mSceneMgr->createEntity("Jaiqua" + StringConverter::toString(i + 1), "jaiqua.mesh");
-
-#ifdef INCLUDE_RTSHADER_SYSTEM
-            if (mShaderGenerator->getTargetLanguage() == "glsles")
-            {
-                MaterialPtr mat = MaterialManager::getSingleton().getByName("jaiqua");
-                mat->getTechnique(0)->getPass(0)->setShadowCasterFragmentProgram("Ogre/BasicFragmentPrograms/PassthroughFpGLSLES");
-            }
-#endif
             ent->setMaterialName("jaiqua");
             sn->attachObject(ent);
-
-#if defined(INCLUDE_RTSHADER_SYSTEM) && defined(RTSHADER_SYSTEM_BUILD_EXT_SHADERS)
-            //see above
-            if (mShaderGenerator->getTargetLanguage() != "glsles" &&
-                    mShaderGenerator->getTargetLanguage() != "hlsl")
-            {
-                //In case the system uses the RTSS, the following line will ensure
-                //that the entity is using hardware animation in RTSS as well.
-                RTShader::HardwareSkinningFactory::getSingleton().prepareEntityForSkinning(ent, Ogre::RTShader::ST_DUAL_QUATERNION, true, false);
-                
-                //The following line is needed only because the Jaiqua model material has shaders and
-                //as such is not automatically reflected in the RTSS system
-                RTShader::ShaderGenerator::getSingleton().createShaderBasedTechnique(
-                    *ent->getSubEntity(0)->getMaterial(),
-                    Ogre::MaterialManager::DEFAULT_SCHEME_NAME,
-                    Ogre::RTShader::ShaderGenerator::DEFAULT_SCHEME_NAME,
-                    true);
-            }
-#endif
         
             // enable the entity's sneaking animation at a random speed and loop it manually since translation is involved
             as = ent->getAnimationState("Sneak");
             as->setEnabled(true);
             as->setLoop(false);
-            mAnimSpeeds.push_back(Math::RangeRandom(0.5, 1.5));
+
+            controllerMgr.createController(controllerMgr.getFrameTimeSource(),
+                                           AnimationStateControllerValue::create(as, true),
+                                           ScaleControllerFunction::create(Math::RangeRandom(0.5, 1.5)));
             mAnimStates.push_back(as);
         }
 
@@ -374,18 +349,12 @@ protected:
     {
         mModelNodes.clear();
         mAnimStates.clear();
-        mAnimSpeeds.clear();
         MeshManager::getSingleton().remove("floor", ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME);
         mSceneMgr->destroyEntity("Jaiqua");
 
 #if defined(INCLUDE_RTSHADER_SYSTEM) && defined(RTSHADER_SYSTEM_BUILD_EXT_SHADERS)
-        //see above
-        if (mShaderGenerator->getTargetLanguage() != "glsles" &&
-                mShaderGenerator->getTargetLanguage() != "hlsl")
-        {
-            Ogre::RTShader::RenderState* renderState = mShaderGenerator->getRenderState(Ogre::RTShader::ShaderGenerator::DEFAULT_SCHEME_NAME);
-            renderState->removeTemplateSubRenderState(mSrsHardwareSkinning);
-        }
+        Ogre::RTShader::RenderState* renderState = mShaderGenerator->getRenderState(Ogre::RTShader::ShaderGenerator::DEFAULT_SCHEME_NAME);
+        renderState->removeTemplateSubRenderState(mSrsHardwareSkinning);
 #endif
     }
 
@@ -399,7 +368,6 @@ protected:
 
     std::vector<SceneNode*> mModelNodes;
     std::vector<AnimationState*> mAnimStates;
-    std::vector<Real> mAnimSpeeds;
 
     Vector3 mSneakStartPos;
     Vector3 mSneakEndPos;

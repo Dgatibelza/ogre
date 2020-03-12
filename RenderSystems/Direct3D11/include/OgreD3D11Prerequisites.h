@@ -31,8 +31,8 @@ THE SOFTWARE.
 
 
 #include "OgrePrerequisites.h"
-#include "WIN32/OgreMinGWSupport.h" // extra defines for MinGW to deal with DX SDK
-#include "WIN32/OgreComPtr.h"       // too much resource leaks were caused without it by throwing constructors
+#include "OgreMinGWSupport.h" // extra defines for MinGW to deal with DX SDK
+#include "OgreComPtr.h"       // too much resource leaks were caused without it by throwing constructors
 
 #include "OgreException.h"
 
@@ -63,7 +63,7 @@ THE SOFTWARE.
 #   include <C:\Program Files (x86)\Windows Kits\8.0\Include\um\d3d11shader.h>
 #else
 #   include <d3d11shader.h>
-#   include <D3Dcompiler.h>
+#   include <d3dcompiler.h>
 #endif
  
 
@@ -100,7 +100,7 @@ namespace Ogre
     class D3D11DriverList;
     class D3D11VideoMode;
     class D3D11VideoModeList;
-    class D3D11GpuProgramManager;
+    class GpuProgramManager;
     class D3D11HardwareBufferManager;
     class D3D11HardwareIndexBuffer;
     class D3D11HLSLProgramFactory;
@@ -109,6 +109,7 @@ namespace Ogre
     class D3D11Device;
     class D3D11HardwareBuffer;
     class D3D11HardwarePixelBuffer;
+    class D3D11RenderTarget;
 
     typedef SharedPtr<D3D11HLSLProgram> D3D11HLSLProgramPtr;
     typedef SharedPtr<D3D11Texture>     D3D11TexturePtr;
@@ -132,13 +133,16 @@ namespace Ogre
 
     class _OgreD3D11Export D3D11RenderingAPIException : public RenderingAPIException
     {
+        int hresult;
     public:
         D3D11RenderingAPIException(int hr, const String& inDescription, const String& inSource, const char* inFile, long inLine)
-            : RenderingAPIException(hr, inDescription, inSource, inFile, inLine) {}
+            : RenderingAPIException(hr, inDescription, inSource, inFile, inLine), hresult(hr) {}
+
+        int getHResult() const { return hresult; }
 
         const String& getFullDescription(void) const {
             StringStream ss(RenderingAPIException::getFullDescription());
-            ss << " HRESULT=" << number;
+            ss << " HRESULT=" << hresult;
             fullDesc = ss.str();
             return fullDesc;
         }

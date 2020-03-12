@@ -77,8 +77,10 @@ namespace Ogre
             Root::getSingleton().destroySceneManager(mCompositeMapSM);
             mCompositeMapSM = 0;
             mCompositeMapCam = 0;
+            mCamNode = 0;
             mCompositeMapPlane = 0;
             mCompositeMapLight = 0;
+            mLightNode = 0;
         }
     }
     //---------------------------------------------------------------------
@@ -92,8 +94,9 @@ namespace Ogre
             float camDist = 100;
             float halfCamDist = camDist * 0.5f;
             mCompositeMapCam = mCompositeMapSM->createCamera("cam");
-            mCompositeMapCam->setPosition(Vector3(0, 0, camDist));
-            mCompositeMapCam->lookAt(Vector3::ZERO);
+            mCamNode = mCompositeMapSM->getRootSceneNode()->createChildSceneNode(Vector3(0, 0, camDist));
+            mCamNode->lookAt(Vector3::ZERO, Node::TS_PARENT);
+            mCamNode->attachObject(mCompositeMapCam);
             mCompositeMapCam->setProjectionType(PT_ORTHOGRAPHIC);
             mCompositeMapCam->setNearClipDistance(10);
             mCompositeMapCam->setFarClipDistance(500);
@@ -102,6 +105,8 @@ namespace Ogre
             // Just in case material relies on light auto params
             mCompositeMapLight = mCompositeMapSM->createLight();
             mCompositeMapLight->setType(Light::LT_DIRECTIONAL);
+            mLightNode = mCompositeMapSM->getRootSceneNode()->createChildSceneNode();
+            mLightNode->attachObject(mCompositeMapLight);
 
             RenderSystem* rSys = Root::getSingleton().getRenderSystem();
             Real hOffset = rSys->getHorizontalTexelOffset() / (Real)size;
@@ -110,7 +115,7 @@ namespace Ogre
 
             // set up scene
             mCompositeMapPlane = mCompositeMapSM->createManualObject();
-            mCompositeMapPlane->begin(mat->getName());
+            mCompositeMapPlane->begin(mat);
             mCompositeMapPlane->position(-halfCamDist, halfCamDist, 0);
             mCompositeMapPlane->textureCoord(0 - hOffset, 0 - vOffset);
             mCompositeMapPlane->position(-halfCamDist, -halfCamDist, 0);
@@ -126,9 +131,9 @@ namespace Ogre
         }
 
         // update
-        mCompositeMapPlane->setMaterialName(0, mat->getName());
+        mCompositeMapPlane->setMaterial(0, mat);
         TerrainGlobalOptions& globalopts = TerrainGlobalOptions::getSingleton();
-        mCompositeMapLight->setDirection(globalopts.getLightMapDirection());
+        mLightNode->setDirection(globalopts.getLightMapDirection(), Node::TS_WORLD);
         mCompositeMapLight->setDiffuseColour(globalopts.getCompositeMapDiffuse());
         mCompositeMapSM->setAmbientLight(globalopts.getCompositeMapAmbient());
 
@@ -143,9 +148,9 @@ namespace Ogre
         if (!mCompositeMapRTT)
         {
             mCompositeMapRTT = TextureManager::getSingleton().createManual(
-                mCompositeMapSM->getName() + "/compRTT", 
-                ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME, TEX_TYPE_2D, static_cast<uint>(size), static_cast<uint>(size), 0, PF_BYTE_RGBA,
-                TU_RENDERTARGET).get();
+                mCompositeMapSM->getName() + "/compRTT", mat->getGroup(),
+                TEX_TYPE_2D, static_cast<uint>(size), static_cast<uint>(size), 0,
+                PF_BYTE_RGBA, TU_RENDERTARGET).get();
             RenderTarget* rtt = mCompositeMapRTT->getBuffer()->getRenderTarget();
             // don't render all the time, only on demand
             rtt->setAutoUpdated(false);

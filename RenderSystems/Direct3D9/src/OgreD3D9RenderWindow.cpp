@@ -35,7 +35,6 @@ THE SOFTWARE.
 #include "OgreImageCodec.h"
 #include "OgreStringConverter.h"
 #include "OgreRoot.h"
-#include "OgreWindowEventUtilities.h"
 #include "OgreD3D9DeviceManager.h"
 #include "OgreDepthBuffer.h"
 
@@ -76,6 +75,7 @@ namespace Ogre
         HINSTANCE hInst = mInstance;
     
         HWND parentHWnd = 0;
+        WNDPROC windowProc = DefWindowProc;
         HWND externalHandle = 0;
         mFSAAType = D3DMULTISAMPLE_NONE;
         mFSAAQuality = 0;
@@ -93,8 +93,9 @@ namespace Ogre
         size_t fsaaSamples = 0;
         String fsaaHint;
         bool enableDoubleClick = false;
-        int monitorIndex = -1;  //Default by detecting the adapter from left / top position
-        
+
+        D3D9RenderSystem* rsys = static_cast<D3D9RenderSystem*>(Root::getSingleton().getRenderSystem());
+        int monitorIndex = rsys->getAdapterNumber();  // default to whatever was set in "Rendering Device" config option
 
         if(miscParams)
         {
@@ -116,6 +117,9 @@ namespace Ogre
             opt = miscParams->find("parentWindowHandle");
             if(opt != miscParams->end())
                 parentHWnd = (HWND)StringConverter::parseSizeT(opt->second);
+            opt = miscParams->find("windowProc");
+            if (opt != miscParams->end())
+                windowProc = reinterpret_cast<WNDPROC>(StringConverter::parseSizeT(opt->second));
             // externalWindowHandle     -> externalHandle
             opt = miscParams->find("externalWindowHandle");
             if(opt != miscParams->end())
@@ -334,7 +338,7 @@ namespace Ogre
 
             // Register the window class
             // NB allow 4 bytes of window data for D3D9RenderWindow pointer
-            WNDCLASS wc = { classStyle, WindowEventUtilities::_WndProc, 0, 0, hInst,
+            WNDCLASS wc = { classStyle, windowProc, 0, 0, hInst,
                 LoadIcon(0, IDI_APPLICATION), LoadCursor(NULL, IDC_ARROW),
                 (HBRUSH)GetStockObject(BLACK_BRUSH), 0, "OgreD3D9Wnd" };
             RegisterClass(&wc);
@@ -344,8 +348,6 @@ namespace Ogre
             mIsExternal = false;
             mHWnd = CreateWindowEx(dwStyleEx, "OgreD3D9Wnd", title.c_str(), getWindowStyle(fullScreen),
                 mLeft, mTop, winWidth, winHeight, parentHWnd, 0, hInst, this);
-
-            WindowEventUtilities::_addRenderWindow(this);
         }
         else
         {
@@ -584,8 +586,8 @@ namespace Ogre
             // low is < 200fps in this context
             if (!mIsFullScreen)
             {
-                LogManager::getSingleton().logMessage("D3D9 : WARNING - "
-                    "disabling VSync in windowed mode can cause timing issues at lower "
+                LogManager::getSingleton().logWarning(
+                    "D3D9: disabling VSync in windowed mode can cause timing issues at lower "
                     "frame rates, turn VSync on if you observe this problem.");
             }
             presentParams->PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
@@ -665,7 +667,6 @@ namespace Ogre
         
         if (mHWnd && !mIsExternal)
         {
-            WindowEventUtilities::_removeRenderWindow(this);
             DestroyWindow(mHWnd);
         }
 
@@ -781,40 +782,27 @@ namespace Ogre
 
         if( name == "D3DDEVICE" )
         {
-            IDirect3DDevice9* *pDev = (IDirect3DDevice9**)pData;
-            *pDev = getD3D9Device();
-            return;
+            *(IDirect3DDevice9**)pData = getD3D9Device();
         }       
         else if( name == "WINDOW" )
         {
-            HWND *pHwnd = (HWND*)pData;
-            *pHwnd = getWindowHandle();
-            return;
+            *(HWND*)pData = getWindowHandle();
         }
         else if( name == "isTexture" )
         {
-            bool *b = reinterpret_cast< bool * >( pData );
-            *b = false;
-
-            return;
+            *(bool*)pData = false;
         }
         else if( name == "D3DZBUFFER" )
         {
-            IDirect3DSurface9* *pSurf = (IDirect3DSurface9**)pData;
-            *pSurf = mDevice->getDepthBuffer(this);
-            return;
+            *(IDirect3DSurface9**)pData = mDevice->getDepthBuffer(this);
         }
         else if( name == "DDBACKBUFFER" )
         {
-            IDirect3DSurface9* *pSurf = (IDirect3DSurface9**)pData;
-            *pSurf = mDevice->getBackBuffer(this);
-            return;
+            *(IDirect3DSurface9**)pData = mDevice->getBackBuffer(this);
         }
         else if( name == "DDFRONTBUFFER" )
         {
-            IDirect3DSurface9* *pSurf = (IDirect3DSurface9**)pData;
-            *pSurf = mDevice->getBackBuffer(this);
-            return;
+            *(IDirect3DSurface9**)pData = mDevice->getBackBuffer(this);
         }
     }
 

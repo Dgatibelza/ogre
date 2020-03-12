@@ -26,10 +26,6 @@ THE SOFTWARE.
 -----------------------------------------------------------------------------
 */
 #include "OgreStableHeaders.h"
-#include "Threading/OgreDefaultWorkQueueStandard.h"
-#include "OgreLogManager.h"
-#include "OgreRoot.h"
-#include "OgreRenderSystem.h"
 
 namespace Ogre
 {
@@ -68,7 +64,7 @@ namespace Ogre
             Root::getSingleton().getRenderSystem()->preExtraThreadsStarted();
 
         mNumThreadsRegisteredWithRS = 0;
-        for (uint8 i = 0; i < mWorkerThreadCount; ++i)
+        for (size_t i = 0; i < mWorkerThreadCount; ++i)
         {
             OGRE_THREAD_CREATE(t, *mWorkerFunc);
             mWorkers.push_back(t);

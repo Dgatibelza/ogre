@@ -35,6 +35,15 @@ namespace Ogre {
     GLVertexArrayObject::GLVertexArrayObject() : mCreatorContext(0), mVAO(0), mNeedsUpdate(true), mVertexStart(0) {
     }
 
+    GLVertexArrayObject::~GLVertexArrayObject()
+    {
+        if(mVAO != 0)
+        {
+            GLRenderSystemCommon* rs = static_cast<GLRenderSystemCommon*>(Root::getSingleton().getRenderSystem());
+            rs->_destroyVao(mCreatorContext, mVAO);
+        }
+    }
+    
     void GLVertexArrayObject::bind(GLRenderSystemCommon* rs)
     {
         if(mCreatorContext && mCreatorContext != rs->_getCurrentContext()) // VAO is unusable with current context, destroy it
@@ -75,9 +84,6 @@ namespace Ogre {
             VertexElementSemantic sem = elem.getSemantic();
             unsigned short elemIndex = elem.getIndex();
 
-            if (!GLSLProgramCommon::isAttributeValid(sem, elemIndex))
-                continue; // Skip unused elements
-
             uint32 attrib = (uint32)GLSLProgramCommon::getFixedAttributeIndex(sem, elemIndex);
 
             const HardwareVertexBufferSharedPtr& vertexBuffer = vertexBufferBinding->getBuffer(source);
@@ -85,7 +91,7 @@ namespace Ogre {
                           std::make_pair(attrib, vertexBuffer.get())) == mAttribsBound.end())
                 return true;
 
-            if (vertexBuffer->getIsInstanceData() &&
+            if (vertexBuffer->isInstanceData() &&
                 std::find(mInstanceAttribsBound.begin(), mInstanceAttribsBound.end(), attrib) ==
                     mInstanceAttribsBound.end())
                 return true;
@@ -120,9 +126,6 @@ namespace Ogre {
             VertexElementSemantic sem = elem.getSemantic();
             unsigned short elemIndex = elem.getIndex();
 
-            if (!GLSLProgramCommon::isAttributeValid(sem, elemIndex))
-                continue; // Skip unused elements
-
             uint32 attrib = (uint32)GLSLProgramCommon::getFixedAttributeIndex(sem, elemIndex);
 
             const HardwareVertexBufferSharedPtr& vertexBuffer = vertexBufferBinding->getBuffer(source);
@@ -131,7 +134,7 @@ namespace Ogre {
 
             rs->bindVertexElementToGpu(elem, vertexBuffer, vertexStart);
 
-            if (vertexBuffer->getIsInstanceData())
+            if (vertexBuffer->isInstanceData())
                 mInstanceAttribsBound.push_back(attrib);
         }
 

@@ -27,7 +27,6 @@ THE SOFTWARE.
 */
 #include "OgreStableHeaders.h"
 #include "OgreHardwareIndexBuffer.h"
-#include "OgreHardwareBufferManager.h"
 #include "OgreDefaultHardwareBufferManager.h"
 
 
@@ -38,8 +37,8 @@ namespace Ogre {
         size_t numIndexes, HardwareBuffer::Usage usage, 
         bool useSystemMemory, bool useShadowBuffer) 
         : HardwareBuffer(usage, useSystemMemory, useShadowBuffer)
-        , mMgr(mgr)
         , mIndexType(idxType)
+        , mMgr(mgr)
         , mNumIndexes(numIndexes)
     {
         // Calculate the size of the indexes
@@ -57,8 +56,8 @@ namespace Ogre {
         // Create a shadow buffer if required
         if (mUseShadowBuffer)
         {
-            mShadowBuffer = OGRE_NEW DefaultHardwareIndexBuffer(mIndexType, 
-                mNumIndexes, HardwareBuffer::HBU_DYNAMIC);
+            mShadowBuffer.reset(new DefaultHardwareIndexBuffer(mIndexType,
+                mNumIndexes, HardwareBuffer::HBU_DYNAMIC));
         }
 
 
@@ -70,8 +69,6 @@ namespace Ogre {
         {
             mMgr->_notifyIndexBufferDestroyed(this);
         }
-
-        OGRE_DELETE mShadowBuffer;
     }
 
 }

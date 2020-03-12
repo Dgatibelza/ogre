@@ -111,13 +111,13 @@ namespace Ogre {
                 /** Combination of HBU_STATIC and HBU_WRITE_ONLY
                 This is the optimal buffer usage setting.
                 */
-                HBU_STATIC_WRITE_ONLY = 5,
+                HBU_STATIC_WRITE_ONLY = HBU_STATIC | HBU_WRITE_ONLY,
                 /** Combination of HBU_DYNAMIC and HBU_WRITE_ONLY. If you use
                 this, strongly consider using HBU_DYNAMIC_WRITE_ONLY_DISCARDABLE
                 instead if you update the entire contents of the buffer very
                 regularly.
                 */
-                HBU_DYNAMIC_WRITE_ONLY = 6,
+                HBU_DYNAMIC_WRITE_ONLY = HBU_DYNAMIC | HBU_WRITE_ONLY,
                 /** Combination of HBU_DYNAMIC, HBU_WRITE_ONLY and HBU_DISCARDABLE
                  This means that you expect to replace the entire contents of the buffer on an
                  extremely regular basis, most likely every frame. By selecting this option, you
@@ -128,7 +128,7 @@ namespace Ogre {
                  update regularly. Note that if you create a buffer this way, you should use the
                  HBL_DISCARD flag when locking the contents of it for writing.
                  */
-                HBU_DYNAMIC_WRITE_ONLY_DISCARDABLE = 14
+                HBU_DYNAMIC_WRITE_ONLY_DISCARDABLE = HBU_DYNAMIC_WRITE_ONLY | HBU_DISCARDABLE
 
             };
             /// Locking options
@@ -169,33 +169,15 @@ namespace Ogre {
                 HBL_WRITE_ONLY
 
             };
-
-            /// Device load options
-            /// The following enum is used to controls how data is loaded to devices in a multi device environment
-            /// This enum only works with the Direct3D 9 render system (5/2013).
-            enum UploadOptions 
-            {
-                /* Normal mode, 
-                    Data is automatically updated in all devices 
-                */
-                HBU_DEFAULT    = 0x0000,
-                /* Lazy load,
-                    Data is updated in the currently active device. Any other device will only be updated once 
-                    buffer is requested for rendering.
-                */
-                HBU_ON_DEMAND = 0x0001
-            };
-
         protected:
             size_t mSizeInBytes;
             Usage mUsage;
             bool mIsLocked;
             size_t mLockStart;
             size_t mLockSize;
-            UploadOptions mLockUploadOption;
+            std::unique_ptr<HardwareBuffer> mShadowBuffer;
             bool mSystemMemory;
             bool mUseShadowBuffer;
-            HardwareBuffer* mShadowBuffer;
             bool mShadowUpdated;
             bool mSuppressHardwareUpdate;
             
@@ -208,7 +190,7 @@ namespace Ogre {
             /// Constructor, to be called by HardwareBufferManager only
             HardwareBuffer(Usage usage, bool systemMemory, bool useShadowBuffer) 
                 : mSizeInBytes(0), mUsage(usage), mIsLocked(false), mLockStart(0), mLockSize(0), mSystemMemory(systemMemory),
-                mUseShadowBuffer(useShadowBuffer), mShadowBuffer(NULL), mShadowUpdated(false), 
+                mUseShadowBuffer(useShadowBuffer), mShadowUpdated(false),
                 mSuppressHardwareUpdate(false) 
             {
                 // If use shadow buffer, upgrade to WRITE_ONLY on hardware side
@@ -226,10 +208,9 @@ namespace Ogre {
             @param offset The byte offset from the start of the buffer to lock
             @param length The size of the area to lock, in bytes
             @param options Locking options
-            @param uploadOpt
             @return Pointer to the locked memory
             */
-            virtual void* lock(size_t offset, size_t length, LockOptions options, UploadOptions uploadOpt = HBU_DEFAULT)
+            virtual void* lock(size_t offset, size_t length, LockOptions options)
             {
                 assert(!isLocked() && "Cannot lock this buffer, it is already locked!");
 
@@ -249,7 +230,7 @@ namespace Ogre {
                         mShadowUpdated = true;
                     }
 
-                    ret = mShadowBuffer->lock(offset, length, options, uploadOpt);
+                    ret = mShadowBuffer->lock(offset, length, options);
                 }
                 else
                 {
@@ -259,14 +240,13 @@ namespace Ogre {
                 }
                 mLockStart = offset;
                 mLockSize = length;
-                mLockUploadOption = uploadOpt;
                 return ret;
             }
 
             /// @overload
-            void* lock(LockOptions options, UploadOptions uploadOpt = HBU_DEFAULT)
+            void* lock(LockOptions options)
             {
-                return this->lock(0, mSizeInBytes, options, uploadOpt);
+                return this->lock(0, mSizeInBytes, options);
             }
             /** Releases the lock on this buffer. 
             @remarks 
@@ -356,12 +336,12 @@ namespace Ogre {
                     // Do this manually to avoid locking problems
                     const void *srcData = mShadowBuffer->lockImpl(
                         mLockStart, mLockSize, HBL_READ_ONLY);
-                    // Lock with discard if the whole buffer was locked, otherwise normal
+                    // Lock with discard if the whole buffer was locked, otherwise w/o
                     LockOptions lockOpt;
                     if (mLockStart == 0 && mLockSize == mSizeInBytes)
                         lockOpt = HBL_DISCARD;
                     else
-                        lockOpt = HBL_NORMAL;
+                        lockOpt = HBL_WRITE_ONLY;
                     
                     void *destData = this->lockImpl(
                         mLockStart, mLockSize, lockOpt);
@@ -397,30 +377,68 @@ namespace Ogre {
 
             
     };
-    /** @} */
-    /** @} */
 
     /** Locking helper. Guaranteed unlocking even in case of exception. */
-    template <typename T> struct HardwareBufferLockGuard
+    struct HardwareBufferLockGuard
     {
-        HardwareBufferLockGuard(const T& p, HardwareBuffer::LockOptions options)
-            : pBuf(p)
+        HardwareBufferLockGuard() : pBuf(0), pData(0) {}
+        
+        HardwareBufferLockGuard(HardwareBuffer* p, HardwareBuffer::LockOptions options)
+            : pBuf(0), pData(0) { lock(p, options); }
+        
+        HardwareBufferLockGuard(HardwareBuffer* p, size_t offset, size_t length, HardwareBuffer::LockOptions options)
+            : pBuf(0), pData(0) { lock(p, offset, length, options); }
+        
+        template <typename T>
+        HardwareBufferLockGuard(const SharedPtr<T>& p, HardwareBuffer::LockOptions options)
+            : pBuf(0), pData(0) { lock(p.get(), options); }
+        
+        template <typename T>
+        HardwareBufferLockGuard(const SharedPtr<T>& p, size_t offset, size_t length, HardwareBuffer::LockOptions options)
+            : pBuf(0), pData(0) { lock(p.get(), offset, length, options); }
+        
+        ~HardwareBufferLockGuard() { unlock(); }
+        
+        void unlock()
         {
+            if(pBuf)
+            {
+                pBuf->unlock();
+                pBuf = 0;
+                pData = 0;
+            }   
+        }
+
+        void lock(HardwareBuffer* p, HardwareBuffer::LockOptions options)
+        {
+            assert(p);
+            unlock();
+            pBuf = p;
             pData = pBuf->lock(options);
         }
-        HardwareBufferLockGuard(const T& p, size_t offset, size_t length, HardwareBuffer::LockOptions options)
-            : pBuf(p)
+        
+        void lock(HardwareBuffer* p, size_t offset, size_t length, HardwareBuffer::LockOptions options)
         {
+            assert(p);
+            unlock();
+            pBuf = p;
             pData = pBuf->lock(offset, length, options);
-        }       
-        ~HardwareBufferLockGuard()
-        {
-            pBuf->unlock();
         }
         
-        const T& pBuf;
+        template <typename T>
+        void lock(const SharedPtr<T>& p, HardwareBuffer::LockOptions options)
+            { lock(p.get(), options); }
+        
+        template <typename T>
+        void lock(const SharedPtr<T>& p, size_t offset, size_t length, HardwareBuffer::LockOptions options)
+            { lock(p.get(), offset, length, options); }
+        
+        HardwareBuffer* pBuf;
         void* pData;
     };
+
+    /** @} */
+    /** @} */
 }
 #endif
 

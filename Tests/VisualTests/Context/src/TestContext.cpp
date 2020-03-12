@@ -36,14 +36,9 @@ THE SOFTWARE.
 
 #include <iostream>
 
-#ifdef WIN32
+#if OGRE_PLATFORM == OGRE_PLATFORM_WIN32
 #define WIN32_LEAN_AND_MEAN
-#include "windows.h"
-#endif
-
-#if (OGRE_PLATFORM == OGRE_PLATFORM_APPLE) && __LP64__
-#include <AppKit/AppKit.h>
-static id mAppDelegate;
+#include <windows.h>
 #endif
 
 #ifdef OGRE_STATIC_LIB
@@ -89,7 +84,7 @@ TestContext::TestContext(int argc, char** argv) : OgreBites::SampleContext(), mS
     mSummaryOutputDir = binOpt["-o"];
     mHelp = unOpt["-h"] || unOpt["--help"];
 
-    if(mReferenceSetPath == BLANKSTRING)
+    if(mReferenceSetPath.empty())
         mReferenceSetPath = mOutputDir;
 }
 //-----------------------------------------------------------------------
@@ -140,21 +135,16 @@ void TestContext::setup()
     mWindow->setDeactivateOnFocusChange(false);
     
     locateResources();
-
-    createDummyScene();
+    initialiseRTShaderSystem();
 
     loadResources();
     Ogre::TextureManager::getSingleton().setDefaultNumMipmaps(5);
     mRoot->addFrameListener(this);
 
-#if OGRE_PLATFORM != OGRE_PLATFORM_ANDROID
-    Ogre::WindowEventUtilities::addWindowEventListener(mWindow, this);
-#endif
-
     // Get the path and list of test plugins from the config file.
     Ogre::ConfigFile testConfig;
     testConfig.load(mFSLayer->getConfigFilePath("tests.cfg"));
-    mPluginDirectory = testConfig.getSetting("TestFolder");
+    mPluginDirectory = Ogre::FileSystemLayer::resolveBundlePath(testConfig.getSetting("TestFolder"));
 
 #if OGRE_PLATFORM != OGRE_PLATFORM_APPLE && OGRE_PLATFORM != OGRE_PLATFORM_APPLE_IOS
     if (mPluginDirectory.empty()) mPluginDirectory = ".";   // user didn't specify plugins folder, try current one
@@ -201,7 +191,7 @@ void TestContext::setup()
     strftime(temp, 20, "%Y-%m-%d %H:%M:%S", gmtime(&raw));
     Ogre::String timestamp = Ogre::String(temp);
 
-    if(mOutputDir == BLANKSTRING)
+    if(mOutputDir.empty())
     {
         Ogre::String filestamp = Ogre::String(temp);
         // name for this batch (used for naming the directory, and uniquely identifying this batch)
@@ -278,11 +268,6 @@ OgreBites::Sample* TestContext::loadTests(Ogre::String set)
         OgreBites::SampleSet newSamples = sp->getSamples();
         for (OgreBites::SampleSet::iterator j = newSamples.begin(); j != newSamples.end(); j++)
         {
-            // skip it if using wrong rendersystem
-            Ogre::String rs = (*j)->getRequiredRenderSystem();
-            if(!rs.empty() && rs != mRoot->getRenderSystem()->getName())
-                continue;
-
             // capability check
             try
             {
@@ -371,8 +356,6 @@ bool TestContext::frameEnded(const Ogre::FrameEvent& evt)
 
         if (mCurrentTest->isDone())
         {
-            createDummyScene();
-
             // continue onto the next test
             runSample(0);
 
@@ -401,7 +384,6 @@ void TestContext::runSample(OgreBites::Sample* s)
     Ogre::ControllerManager::getSingleton().setFrameDelay(0);
     Ogre::ControllerManager::getSingleton().setTimeFactor(1.f);
     mCurrentFrame = 0;
-    destroyDummyScene();
 
     OgreBites::Sample* sampleToRun = s;
 
@@ -524,9 +506,6 @@ bool TestContext::oneTimeConfig()
             rs->setConfigOption("FSAA", "2");
 
             try {
-                rs->setConfigOption("Fixed Pipeline Enabled", "No");
-            } catch(...) {}
-            try {
                 rs->setConfigOption("VSync", "No");
             } catch(...) {}
         }
@@ -541,7 +520,7 @@ bool TestContext::oneTimeConfig()
 void TestContext::setupDirectories(Ogre::String batchName)
 {
     // ensure there's a root directory for visual tests
-    if(mOutputDir == BLANKSTRING)
+    if(mOutputDir.empty())
     {
         mOutputDir = mFSLayer->getWritablePath("VisualTests/");
         static_cast<Ogre::FileSystemLayer*>(mFSLayer)->createDirectory(mOutputDir);
@@ -675,16 +654,6 @@ int main(int argc, char *argv[])
     NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
     int retVal = UIApplicationMain(argc, argv, @"UIApplication", @"AppDelegate");
     [pool release];
-    return retVal;
-#elif (OGRE_PLATFORM == OGRE_PLATFORM_APPLE) && __LP64__
-    NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
-
-    mAppDelegate = [[AppDelegate alloc] init];
-    [[NSApplication sharedApplication] setDelegate:mAppDelegate];
-    int retVal = NSApplicationMain(argc, (const char **) argv);
-
-    [pool release];
-
     return retVal;
 #else
     TestContext tc(argc, argv);

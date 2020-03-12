@@ -48,9 +48,6 @@ namespace Ogre {
     protected:
         String mType;
 
-		static void flipEndian(void * pData, size_t size, size_t count);	// invokes Bitwise::bswapChunks() if OGRE_ENDIAN_BIG
-		static void flipEndian(void * pData, size_t size);					// invokes Bitwise::bswapBuffer() if OGRE_ENDIAN_BIG
-
 		/// Single registered codec instance
 		static PVRTCCodec* msInstance;
 
@@ -58,12 +55,8 @@ namespace Ogre {
         PVRTCCodec();
         virtual ~PVRTCCodec() { }
 
-        /// @copydoc Codec::encode
-        DataStreamPtr encode(MemoryDataStreamPtr& input, CodecDataPtr& pData) const;
-        /// @copydoc Codec::encodeToFile
-        void encodeToFile(MemoryDataStreamPtr& input, const String& outFileName, CodecDataPtr& pData) const;
         /// @copydoc Codec::decode
-        DecodeResult decode(DataStreamPtr& input) const;
+        DecodeResult decode(const DataStreamPtr& input) const;
 		/// @copydoc Codec::magicNumberToFileExt
 		String magicNumberToFileExt(const char *magicNumberPtr, size_t maxbytes) const;
         
@@ -76,10 +69,10 @@ namespace Ogre {
 
 	private:
 		/// Decode PVRTCV2 image format
-		DecodeResult decodeV2(DataStreamPtr& stream) const;
+		DecodeResult decodeV2(const DataStreamPtr& stream) const;
 
 		/// Decode PVRTCV3 image format
-		DecodeResult decodeV3(DataStreamPtr& stream) const;
+		DecodeResult decodeV3(const DataStreamPtr& stream) const;
     };
 	/** @} */
 	/** @} */

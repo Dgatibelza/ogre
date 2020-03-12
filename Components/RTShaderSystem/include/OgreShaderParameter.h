@@ -28,7 +28,7 @@ THE SOFTWARE.
 #define _ShaderParameter_
 
 #include "OgreShaderPrerequisites.h"
-#include "OgreVector2.h"
+#include "OgreVector.h"
 #include "OgreMatrix4.h"
 #include "OgreGpuProgramParams.h"
 
@@ -70,7 +70,11 @@ public:
         SPS_TANGENT = 9
     };
 
-    // Shader parameter content.
+    /** Shader parameter content
+     * 
+     * used to resolve Parameters across different SubRenderState instances
+     * Think of it as Semantic extended to the actual parameter content.
+     */ 
     enum Content
     {
         /// Unknown content
@@ -293,6 +297,12 @@ public:
         SPC_TEXTURE_COORDINATE6,
         SPC_TEXTURE_COORDINATE7,
 		
+        /// point sprite coordinates
+        SPC_POINTSPRITE_COORDINATE,
+
+        /// point sprite size
+        SPC_POINTSPRITE_SIZE,
+
         /// Reserved custom content range to be used by user custom shader extensions.
         SPC_CUSTOM_CONTENT_BEGIN    = 1000,
         SPC_CUSTOM_CONTENT_END      = 2000
@@ -321,6 +331,14 @@ public:
     /** Get the name of this parameter. */
     const String& getName() const { return mName; }
 
+    /// internal function for aliasing to GLSL builtins e.g. gl_Position
+    void _rename(const String& newName, bool onlyLocal = false)
+    {
+        if(onlyLocal)
+            mBindName = mName;
+        mName = newName;
+    }
+
     /** Get the type of this parameter. */
     GpuConstantType getType() const { return mType; }
 
@@ -348,10 +366,18 @@ public:
     /** Sets the number of elements in the parameter (for arrays). */
     void setSize(size_t size) { mSize = size; }
 
+    /// track whether this was used
+    void setUsed(bool used) { mUsed = used; }
+    bool isUsed() { return mUsed; }
+
 // Attributes.
 protected:
     // Name of this parameter.
     String mName;
+
+    // only used for local renaming
+    String mBindName;
+
     // Type of this parameter.
     GpuConstantType mType;
     // Semantic of this parameter.
@@ -363,6 +389,7 @@ protected:
     // Number of elements in the parameter (for arrays)
     size_t mSize;
     
+    bool mUsed;
 };
 
 typedef ShaderParameterList::iterator           ShaderParameterIterator;
@@ -505,6 +532,20 @@ public:
         }
     }
 
+    void setGpuParameter(const Matrix3& val)
+    {
+        if (mParamsPtr == NULL) return;
+
+        if(mElementSize == 9) // check if tight packing is supported
+        {
+            mParamsPtr->_writeRawConstant(mPhysicalIndex, val, 9);
+        }
+        else
+        {
+            mParamsPtr->_writeRawConstant(mPhysicalIndex, Matrix4(val), mElementSize);
+        }
+    }
+
     /** Update the GPU parameter with the given value. */   
     void setGpuParameter(const Matrix4& val)  
     { 
@@ -541,6 +582,16 @@ public:
         }
     }
 
+    /// light index or array size
+    void updateExtraInfo(size_t data)
+    {
+        if (!mParamsPtr)
+            return;
+
+        mParamsPtr->_setRawAutoConstant(mPhysicalIndex, mAutoConstantType, data, mVariability,
+                                        mElementSize);
+    }
+
 protected:
     // Is it auto constant real based parameter.
     bool mIsAutoConstantReal;
@@ -560,9 +611,11 @@ protected:
     GpuProgramParameters* mParamsPtr;
     // The physical index of this parameter in the GPU program.
     size_t mPhysicalIndex;
+    // The size of this parameter in the GPU program
+    size_t mElementSize;
 };
 
-typedef vector<UniformParameterPtr>::type       UniformParameterList;
+typedef std::vector<UniformParameterPtr>       UniformParameterList;
 typedef UniformParameterList::iterator          UniformParameterIterator;
 typedef UniformParameterList::const_iterator    UniformParameterConstIterator;
 
@@ -609,7 +662,7 @@ class _OgreRTSSExport ParameterFactory
     // Interface.
 public:
 
-    static ParameterPtr createInPosition(int index);    
+    static ParameterPtr createInPosition(int index, Parameter::Content content = Parameter::SPC_POSITION_OBJECT_SPACE);
     static ParameterPtr createOutPosition(int index);
 
     static ParameterPtr createInNormal(int index);
@@ -625,7 +678,9 @@ public:
 
     static ParameterPtr createInTexcoord(GpuConstantType type, int index, Parameter::Content content);
     static ParameterPtr createOutTexcoord(GpuConstantType type, int index, Parameter::Content content);
+    /// @deprecated use createInTexcoord
     static ParameterPtr createInTexcoord1(int index, Parameter::Content content);
+    /// @deprecated use createOutTexcoord
     static ParameterPtr createOutTexcoord1(int index, Parameter::Content content);
     static ParameterPtr createInTexcoord2(int index, Parameter::Content content);
     static ParameterPtr createOutTexcoord2(int index, Parameter::Content content);
@@ -634,10 +689,10 @@ public:
     static ParameterPtr createInTexcoord4(int index, Parameter::Content content);           
     static ParameterPtr createOutTexcoord4(int index, Parameter::Content content);
 
-    static ParameterPtr createConstParamVector2(Vector2 val);
-    static ParameterPtr createConstParamVector3(Vector3 val);
-    static ParameterPtr createConstParamVector4(Vector4 val);
-    static ParameterPtr createConstParamFloat(float val);   
+    static ParameterPtr createConstParam(const Vector2& val);
+    static ParameterPtr createConstParam(const Vector3& val);
+    static ParameterPtr createConstParam(const Vector4& val);
+    static ParameterPtr createConstParam(float val);
 
     static UniformParameterPtr createSampler(GpuConstantType type, int index);
     static UniformParameterPtr createSampler1D(int index);

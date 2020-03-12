@@ -65,18 +65,23 @@ namespace Ogre {
 
         // Use glMapBuffer
         mRenderSystem->_getStateCacheManager()->bindGLBuffer(mTarget,mBufferId);
-        
-        if (mUsage & HardwareBuffer::HBU_WRITE_ONLY)
+
+        bool writeOnly =
+            options == HardwareBuffer::HBL_WRITE_ONLY ||
+            ((mUsage & HardwareBuffer::HBU_WRITE_ONLY) &&
+             options != HardwareBuffer::HBL_READ_ONLY && options != HardwareBuffer::HBL_NORMAL);
+
+        if (writeOnly)
         {
             access |= GL_MAP_WRITE_BIT;
-            access |= GL_MAP_FLUSH_EXPLICIT_BIT;
             if(options == HardwareBuffer::HBL_DISCARD || options == HardwareBuffer::HBL_NO_OVERWRITE)
             {
                 // Discard the buffer
                 access |= GL_MAP_INVALIDATE_RANGE_BIT;
             }
-            //FIXME Is this correct usage for shader storage buffers?
-            access |= GL_MAP_UNSYNCHRONIZED_BIT;
+ 
+            if(options == HardwareBuffer::HBL_NO_OVERWRITE)
+                access |= GL_MAP_UNSYNCHRONIZED_BIT;
         }
         else if (options == HardwareBuffer::HBL_READ_ONLY)
             access |= GL_MAP_READ_BIT;
@@ -84,30 +89,24 @@ namespace Ogre {
             access |= GL_MAP_READ_BIT | GL_MAP_WRITE_BIT;
 
         // FIXME: Big stall here
+        // NOTE: Stall happens, when using modern drivers, with multi threading enabled driver
         void* pBuffer;
         OGRE_CHECK_GL_ERROR(pBuffer = glMapBufferRange(mTarget, offset, length, access));
-        //OGRE_CHECK_GL_ERROR(pBuffer = glMapBuffer(mTarget, GL_WRITE_ONLY));
 
         if(pBuffer == 0)
         {
-            OGRE_EXCEPT(Exception::ERR_INTERNAL_ERROR,
-                        "Buffer: Out of memory",
-                        "GL3PlusHardwareBuffer::lock");
+            OGRE_EXCEPT(
+                Exception::ERR_INTERNAL_ERROR,
+                StringUtil::format("failed to lock %zu bytes at %zu of total %zu bytes", length, offset, mSizeInBytes));
         }
-
 
         // pBuffer is already offsetted in glMapBufferRange
         return pBuffer;
     }
 
-    void GL3PlusHardwareBuffer::unlockImpl(size_t lockSize)
+    void GL3PlusHardwareBuffer::unlockImpl()
     {
         mRenderSystem->_getStateCacheManager()->bindGLBuffer(mTarget, mBufferId);
-
-        if (mUsage & HardwareBuffer::HBU_WRITE_ONLY)
-        {
-            OGRE_CHECK_GL_ERROR(glFlushMappedBufferRange(mTarget, 0, lockSize));
-        }
 
         GLboolean mapped;
         OGRE_CHECK_GL_ERROR(mapped = glUnmapBuffer(mTarget));

@@ -81,20 +81,7 @@ namespace Ogre
             renderSystem->mActiveViewport = NULL;
         }                       
     }
-
-    //---------------------------------------------------------------------
-    D3D9Device* D3D9DeviceManager::getActiveDevice()
-    {   
-        if (mActiveDevice == NULL)
-        {
-            OGRE_EXCEPT( Exception::ERR_INVALIDPARAMS, 
-                "Current active device is NULL !!!", 
-                "D3D9RenderSystem::getActiveDevice" );
-        }
-
-        return mActiveDevice;       
-    }
-
+	
     //---------------------------------------------------------------------
     void D3D9DeviceManager::setActiveRenderTargetDevice(D3D9Device* device)
     {
@@ -362,8 +349,8 @@ namespace Ogre
         
 
         // Do we want to preserve the FPU mode? Might be useful for scientific apps
-        ConfigOptionMap& options = renderSystem->getConfigOptions();
-        ConfigOptionMap::iterator opti = options.find("Floating-point mode");
+        auto options = renderSystem->getConfigOptions();
+        auto opti = options.find("Floating-point mode");
         if (opti != options.end() && opti->second.currentValue == "Consistent")
             extraFlags |= D3DCREATE_FPU_PRESERVE;
 

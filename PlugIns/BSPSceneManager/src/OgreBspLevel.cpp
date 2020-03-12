@@ -26,7 +26,6 @@ THE SOFTWARE.
 -----------------------------------------------------------------------------
 */
 #include "OgreBspLevel.h"
-#include "OgreBspResourceManager.h"
 #include "OgreException.h"
 #include "OgreMaterial.h"
 #include "OgreMaterialManager.h"
@@ -58,8 +57,7 @@ namespace Ogre {
         ResourceHandle handle, const String& group, bool isManual, 
         ManualResourceLoader* loader)
       : Resource(creator, name, handle, group, isManual, loader), 
-        mRootNode(0), 
-        mVertexData(0), 
+        mRootNode(0),
         mLeafFaceGroups(0),
         mFaceGroups(0), 
         mBrushes(0),
@@ -126,8 +124,8 @@ namespace Ogre {
     //-----------------------------------------------------------------------
     void BspLevel::unloadImpl()
     {
-        if (mVertexData)
-            OGRE_DELETE mVertexData;
+        if (mRenderOp.vertexData)
+            OGRE_DELETE mRenderOp.vertexData;
         mIndexes.reset();
         if (mFaceGroups)
             OGRE_DELETE_ARRAY_T(mFaceGroups, StaticFaceGroup, (size_t)mNumFaceGroups, MEMCATEGORY_GEOMETRY);
@@ -140,7 +138,10 @@ namespace Ogre {
         if (mBrushes)
             OGRE_DELETE_ARRAY_T(mBrushes, Brush, (size_t)mNumBrushes, MEMCATEGORY_GEOMETRY);
 
-        mVertexData = 0;
+        // no need to delete index buffer, will be handled by shared pointer
+        OGRE_DELETE mRenderOp.indexData;
+        mRenderOp.indexData = 0;
+        mRenderOp.vertexData = 0;
         mRootNode = 0;
         mFaceGroups = 0;
         mLeafFaceGroups = 0;
@@ -219,19 +220,15 @@ namespace Ogre {
         // Vertices
         //-----------------------------------------------------------------------
         // Allocate memory for vertices & copy
-        mVertexData = OGRE_NEW VertexData();
+        mRenderOp.vertexData = OGRE_NEW VertexData();
 
         /// Create vertex declaration
-        VertexDeclaration* decl = mVertexData->vertexDeclaration;
+        VertexDeclaration* decl = mRenderOp.vertexData->vertexDeclaration;
         size_t offset = 0;
-        decl->addElement(0, offset, VET_FLOAT3, VES_POSITION);
-        offset += VertexElement::getTypeSize(VET_FLOAT3);
-        decl->addElement(0, offset, VET_FLOAT3, VES_NORMAL);
-        offset += VertexElement::getTypeSize(VET_FLOAT3);
-        decl->addElement(0, offset, VET_COLOUR, VES_DIFFUSE);
-        offset += VertexElement::getTypeSize(VET_COLOUR);
-        decl->addElement(0, offset, VET_FLOAT2, VES_TEXTURE_COORDINATES, 0);
-        offset += VertexElement::getTypeSize(VET_FLOAT2);
+        offset += decl->addElement(0, offset, VET_FLOAT3, VES_POSITION).getSize();
+        offset += decl->addElement(0, offset, VET_FLOAT3, VES_NORMAL).getSize();
+        offset += decl->addElement(0, offset, VET_COLOUR, VES_DIFFUSE).getSize();
+        offset += decl->addElement(0, offset, VET_FLOAT2, VES_TEXTURE_COORDINATES, 0).getSize();
         decl->addElement(0, offset, VET_FLOAT2, VES_TEXTURE_COORDINATES, 1);
 
         // Build initial patches - we need to know how big the vertex buffer needs to be
@@ -261,10 +258,10 @@ namespace Ogre {
         }
         vbuf->unlock();
         // Setup binding
-        mVertexData->vertexBufferBinding->setBinding(0, vbuf);
+        mRenderOp.vertexData->vertexBufferBinding->setBinding(0, vbuf);
         // Set other data
-        mVertexData->vertexStart = 0;
-        mVertexData->vertexCount = q3lvl.mNumVertices + mPatchVertexCount;
+        mRenderOp.vertexData->vertexStart = 0;
+        mRenderOp.vertexData->vertexCount = q3lvl.mNumVertices + mPatchVertexCount;
         rgm._notifyWorldGeometryStageEnded();
 
         //-----------------------------------------------------------------------
@@ -279,14 +276,17 @@ namespace Ogre {
         // Set up index buffer
         // NB Quake3 indexes are 32-bit
         // Copy the indexes into a software area for staging
-        mNumIndexes = q3lvl.mNumElements + mPatchIndexCount;
+        size_t numIndexes = q3lvl.mNumElements + mPatchIndexCount;
         // Create an index buffer manually in system memory, allow space for patches
-        mIndexes.reset(OGRE_NEW DefaultHardwareIndexBuffer(
-            HardwareIndexBuffer::IT_32BIT, 
-            mNumIndexes, 
-            HardwareBuffer::HBU_DYNAMIC));
+        mIndexes.reset(OGRE_NEW DefaultHardwareIndexBuffer(HardwareIndexBuffer::IT_32BIT, numIndexes,
+                                                           HardwareBuffer::HBU_DYNAMIC));
         // Write main indexes
         mIndexes->writeData(0, sizeof(unsigned int) * q3lvl.mNumElements, q3lvl.mElements, true);
+        // create actual hardware index buffer
+        // Create enough index space to render whole level, index data is per-frame
+        mRenderOp.indexData = OGRE_NEW IndexData();
+        mRenderOp.indexData->indexBuffer = HardwareBufferManager::getSingleton().createIndexBuffer(
+            HardwareIndexBuffer::IT_32BIT, numIndexes, HardwareBuffer::HBU_DYNAMIC_WRITE_ONLY_DISCARDABLE);
         rgm._notifyWorldGeometryStageEnded();
 
         // now build patch information
@@ -482,7 +482,7 @@ namespace Ogre {
             }
             else
             {
-                LogManager::getSingleton().logMessage("!!! Unknown Face Type !!!", LML_CRITICAL);
+                LogManager::getSingleton().logError("Unknown Face Type");
             }
 
             // progress reporting
@@ -715,6 +715,69 @@ namespace Ogre {
 
 
     }
+    //-----------------------------------------------------------------------
+    unsigned int BspLevel::cacheGeometry(uint32* pIndexes, const StaticFaceGroup* faceGroup)
+    {
+        // Skip sky always
+        if (faceGroup->isSky)
+            return 0;
+
+        size_t idxStart, numIdx, vertexStart;
+
+        if (faceGroup->fType == FGT_FACE_LIST)
+        {
+            idxStart = faceGroup->elementStart;
+            numIdx = faceGroup->numElements;
+            vertexStart = faceGroup->vertexStart;
+        }
+        else if (faceGroup->fType == FGT_PATCH)
+        {
+
+            idxStart = faceGroup->patchSurf->getIndexOffset();
+            numIdx = faceGroup->patchSurf->getCurrentIndexCount();
+            vertexStart = faceGroup->patchSurf->getVertexOffset();
+        }
+        else
+        {
+            // Unsupported face type
+            return 0;
+        }
+
+        // Copy index data
+        unsigned int* pSrc = static_cast<unsigned int*>(mIndexes->lock(
+            idxStart * sizeof(unsigned int), numIdx * sizeof(unsigned int), HardwareBuffer::HBL_READ_ONLY));
+        // Offset the indexes here
+        // we have to do this now rather than up-front because the
+        // indexes are sometimes reused to address different vertex chunks
+        for (size_t elem = 0; elem < numIdx; ++elem)
+        {
+            *pIndexes++ = *pSrc++ + static_cast<unsigned int>(vertexStart);
+        }
+        mIndexes->unlock();
+
+        // return number of elements
+        return static_cast<unsigned int>(numIdx);
+    }
+    bool BspLevel::cacheGeometry(const std::vector<StaticFaceGroup*>& materialFaceGroups)
+    {
+        // Empty existing cache
+        mRenderOp.indexData->indexCount = 0;
+        // lock index buffer ready to receive data
+        uint32* pIdx =
+            static_cast<uint32*>(mRenderOp.indexData->indexBuffer->lock(HardwareBuffer::HBL_DISCARD));
+        for (auto faceGroup : materialFaceGroups)
+        {
+            // Cache each
+            unsigned int numelems = cacheGeometry(pIdx, faceGroup);
+            mRenderOp.indexData->indexCount += numelems;
+            pIdx += numelems;
+        }
+        // Unlock the buffer
+        mRenderOp.indexData->indexBuffer->unlock();
+
+        // Skip if no faces to process (we're not doing flare types yet)
+        return mRenderOp.indexData->indexCount != 0;
+    }
 
     //-----------------------------------------------------------------------
     void BspLevel::initQuake3Patches(const Quake3Level & q3lvl, VertexDeclaration* decl)
@@ -778,7 +841,7 @@ namespace Ogre {
         size_t currVertOffset = vertOffset;
         size_t currIndexOffset = indexOffset;
 
-        HardwareVertexBufferSharedPtr vbuf = mVertexData->vertexBufferBinding->getBuffer(0);
+        HardwareVertexBufferSharedPtr vbuf = mRenderOp.vertexData->vertexBufferBinding->getBuffer(0);
 
         for (i = mPatches.begin(); i != iend; ++i)
         {
@@ -880,7 +943,7 @@ namespace Ogre {
             {
                 StringUtil::toLowerCase(line);
                 // Remove quotes
-                while( ( pos = line.find("\"",0) ) != String::npos )
+                while( ( pos = line.find('\"',0) ) != String::npos )
                 {
                     line = line.substr(0,pos) + line.substr(pos+1,line.length()-(pos+1));
                 }
@@ -929,7 +992,7 @@ namespace Ogre {
         MovableToNodeMap::iterator i = mMovableToNodeMap.find(mov);
         if (i != mMovableToNodeMap.end())
         {
-            list<BspNode*>::type::iterator nodeit, nodeitend;
+            std::list<BspNode*>::iterator nodeit, nodeitend;
             nodeitend = i->second.end();
             for (nodeit = i->second.begin(); nodeit != nodeitend; ++nodeit)
             {
@@ -950,9 +1013,7 @@ namespace Ogre {
         {
             // Add to movable->node map
             // Insert all the time, will get current if already there
-            std::pair<MovableToNodeMap::iterator, bool> p = 
-                mMovableToNodeMap.insert(
-                MovableToNodeMap::value_type(mov, list<BspNode*>::type()));
+            std::pair<MovableToNodeMap::iterator, bool> p = mMovableToNodeMap.emplace(mov, std::list<BspNode*>());
 
             p.first->second.push_back(node);
 
@@ -990,7 +1051,7 @@ namespace Ogre {
         MovableToNodeMap::iterator i = mMovableToNodeMap.find(mov);
         if (i != mMovableToNodeMap.end())
         {
-            list<BspNode*>::type::iterator nodeit, nodeitend;
+            std::list<BspNode*>::iterator nodeit, nodeitend;
             nodeitend = i->second.end();
             for (nodeit = i->second.begin(); nodeit != nodeitend; ++nodeit)
             {

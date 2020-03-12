@@ -30,6 +30,8 @@ THE SOFTWARE.
 #define __EAGL2Window_H__
 
 #include "OgreRenderWindow.h"
+#include "OgreGLRenderTarget.h"
+#include "OgreEAGLES2Context.h"
 
 #ifdef __OBJC__
 #import "OgreEAGL2View.h"
@@ -45,9 +47,8 @@ typedef UIWindow *NativeWindowType;
 
 namespace Ogre {
     class EAGL2Support;
-    class EAGLES2Context;
 
-    class _OgrePrivate EAGL2Window : public RenderWindow
+    class _OgrePrivate EAGL2Window : public RenderWindow, public GLRenderTarget
     {
         protected:
             bool mClosed;
@@ -81,7 +82,6 @@ namespace Ogre {
             void resize(unsigned int widthPt, unsigned int heightPt);
             void windowMovedOrResized();
             int _getPixelFromPoint(float viewPt) { return mIsContentScalingSupported ? (int)viewPt * mContentScalingFactor : (int)viewPt; }
-            virtual void _beginUpdate();
 
     public:
             EAGL2Window(EAGL2Support* glsupport);
@@ -115,6 +115,8 @@ namespace Ogre {
             virtual void getCustomAttribute(const String& name, void* pData);
 
             bool requiresTextureFlipping() const { return false; }
+
+            virtual GLContext* getContext() const { return mContext; }
     };
 }
 

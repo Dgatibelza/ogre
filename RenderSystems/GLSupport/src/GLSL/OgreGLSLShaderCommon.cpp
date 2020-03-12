@@ -40,16 +40,22 @@ THE SOFTWARE.
 namespace Ogre {
     //-----------------------------------------------------------------------
     uint GLSLShaderCommon::mShaderCount = 0;
-    GLSLShaderCommon::CmdPreprocessorDefines GLSLShaderCommon::msCmdPreprocessorDefines;
+
     GLSLShaderCommon::CmdAttach GLSLShaderCommon::msCmdAttach;
     GLSLShaderCommon::CmdColumnMajorMatrices GLSLShaderCommon::msCmdColumnMajorMatrices;
-    GLSLShaderCommon::CmdInputOperationType GLSLShaderCommon::msInputOperationTypeCmd;
-    GLSLShaderCommon::CmdOutputOperationType GLSLShaderCommon::msOutputOperationTypeCmd;
-    GLSLShaderCommon::CmdMaxOutputVertices GLSLShaderCommon::msMaxOutputVerticesCmd;
+
+    String GLSLShaderCommon::getResourceLogName() const
+    {
+        if(mLoadFromFile)
+            return "'" + mFilename + "'";
+        return "'"+mName+"'";
+    }
 
     //-----------------------------------------------------------------------
-    void GLSLShaderCommon::loadFromSource(void)
+    void GLSLShaderCommon::prepareImpl()
     {
+        HighLevelGpuProgram::prepareImpl(); // loads source
+
         // Preprocess the GLSL shader in order to get a clean source
         CPreprocessor cpp;
 
@@ -58,60 +64,21 @@ namespace Ogre {
         if(getLanguage() == "glsles")
             cpp.Define("GL_ES", 5, 1);
 
-        // Pass all user-defined macros to preprocessor
-        if (!mPreprocessorDefines.empty ())
+        RenderSystem* renderSystem = Root::getSingleton().getRenderSystem();
+        if (renderSystem && renderSystem->isReverseDepthBufferEnabled())
         {
-            String::size_type pos = 0;
-            while (pos != String::npos)
-            {
-                // Find delims
-                String::size_type endPos = mPreprocessorDefines.find_first_of(";,=", pos);
-                if (endPos != String::npos)
-                {
-                    String::size_type macro_name_start = pos;
-                    size_t macro_name_len = endPos - pos;
-                    pos = endPos;
-
-                    // Check definition part
-                    if (mPreprocessorDefines[pos] == '=')
-                    {
-                        // set up a definition, skip delim
-                        ++pos;
-                        String::size_type macro_val_start = pos;
-                        size_t macro_val_len;
-
-                        endPos = mPreprocessorDefines.find_first_of(";,", pos);
-                        if (endPos == String::npos)
-                        {
-                            macro_val_len = mPreprocessorDefines.size () - pos;
-                            pos = endPos;
-                        }
-                        else
-                        {
-                            macro_val_len = endPos - pos;
-                            pos = endPos+1;
-                        }
-                        cpp.Define (
-                            mPreprocessorDefines.c_str () + macro_name_start, macro_name_len,
-                            mPreprocessorDefines.c_str () + macro_val_start, macro_val_len);
-                    }
-                    else
-                    {
-                        // No definition part, define as "1"
-                        ++pos;
-                        cpp.Define (
-                            mPreprocessorDefines.c_str () + macro_name_start, macro_name_len, 1);
-                    }
-                }
-                else
-                {
-                    if(pos < mPreprocessorDefines.size())
-                        cpp.Define (mPreprocessorDefines.c_str () + pos, mPreprocessorDefines.size() - pos, 1);
-
-                    pos = endPos;
-                }
-            }
+            cpp.Define("OGRE_REVERSED_Z", 15, 1);
         }
+
+        String defines = mPreprocessorDefines;
+
+        for(const auto& def : parseDefines(defines))
+        {
+            cpp.Define(def.first, strlen(def.first), def.second, strlen(def.second));
+        }
+
+		// deal with includes
+		mSource = _resolveIncludes(mSource, this, mFilename);
 
         size_t out_size = 0;
         const char *src = mSource.c_str ();
@@ -119,44 +86,22 @@ namespace Ogre {
         char *out = cpp.Parse (src, src_len, out_size);
         if (!out || !out_size)
             // Failed to preprocess, break out
-            OGRE_EXCEPT (Exception::ERR_RENDERINGAPI_ERROR,
-            "Failed to preprocess shader " + mName,
-            __FUNCTION__);
+            OGRE_EXCEPT(Exception::ERR_RENDERINGAPI_ERROR, "Failed to preprocess shader " + mName);
 
         mSource = String (out, out_size);
         if (out < src || out > src + src_len)
             free (out);
-    }
-    //---------------------------------------------------------------------------
-    void GLSLShaderCommon::unloadImpl()
-    {
-        // We didn't create mAssemblerProgram through a manager, so override this
-        // implementation so that we don't try to remove it from one. Since getCreator()
-        // is used, it might target a different matching handle!
-        mAssemblerProgram.reset();
-
-        unloadHighLevel();
-    }
-
-    //-----------------------------------------------------------------------
-    void GLSLShaderCommon::populateParameterNames(GpuProgramParametersSharedPtr params)
-    {
-        getConstantDefinitions();
-        params->_setNamedConstants(mConstantDefs);
-        // Don't set logical / physical maps here, as we can't access parameters by logical index in GLHL.
     }
     //-----------------------------------------------------------------------
     GLSLShaderCommon::GLSLShaderCommon(ResourceManager* creator, 
         const String& name, ResourceHandle handle,
         const String& group, bool isManual, ManualResourceLoader* loader)
         : HighLevelGpuProgram(creator, name, handle, group, isManual, loader)
-        , mCompiled(0)
-        , mInputOperationType(RenderOperation::OT_TRIANGLE_LIST)
-        , mOutputOperationType(RenderOperation::OT_TRIANGLE_LIST)
-        , mMaxOutputVertices(3)
         , mColumnMajorMatrices(true)
         , mLinked(0)
         , mShaderID(++mShaderCount) // Increase shader counter and use as ID
+        , mGLShaderHandle(0)
+        , mGLProgramHandle(0)
     {
     }
     //-----------------------------------------------------------------------
@@ -177,16 +122,6 @@ namespace Ogre {
         }
     }
     //-----------------------------------------------------------------------
-    String GLSLShaderCommon::CmdPreprocessorDefines::doGet(const void *target) const
-    {
-        return static_cast<const GLSLShaderCommon*>(target)->getPreprocessorDefines();
-    }
-    void GLSLShaderCommon::CmdPreprocessorDefines::doSet(void *target, const String& val)
-    {
-        static_cast<GLSLShaderCommon*>(target)->setPreprocessorDefines(val);
-    }
-
-    //-----------------------------------------------------------------------
     void GLSLShaderCommon::attachChildShader(const String& name)
     {
         // is the name valid and already loaded?
@@ -197,72 +132,18 @@ namespace Ogre {
         {
             // make sure attached program source gets loaded and compiled
             // don't need a low level implementation for attached shader objects
-            // loadHighLevelImpl will only load the source and compile once
+            // loadHighLevel will only load the source and compile once
             // so don't worry about calling it several times
             GLSLShaderCommon* childShader = static_cast<GLSLShaderCommon*>(hlProgram.get());
             // load the source and attach the child shader only if supported
             if (isSupported())
             {
-                childShader->loadHighLevelImpl();
+                childShader->safePrepare();
+                childShader->loadHighLevel();
                 // add to the container
                 mAttachedGLSLPrograms.push_back( childShader );
                 mAttachedShaderNames += name + " ";
             }
-        }
-    }
-    //-----------------------------------------------------------------------
-    static RenderOperation::OperationType parseOperationType(const String& val)
-    {
-        if (val == "point_list")
-        {
-            return RenderOperation::OT_POINT_LIST;
-        }
-        else if (val == "line_list")
-        {
-            return RenderOperation::OT_LINE_LIST;
-        }
-        else if (val == "line_strip")
-        {
-            return RenderOperation::OT_LINE_STRIP;
-        }
-        else if (val == "triangle_strip")
-        {
-            return RenderOperation::OT_TRIANGLE_STRIP;
-        }
-        else if (val == "triangle_fan")
-        {
-            return RenderOperation::OT_TRIANGLE_FAN;
-        }
-        else 
-        {
-            //Triangle list is the default fallback. Keep it this way?
-            return RenderOperation::OT_TRIANGLE_LIST;
-        }
-    }
-    //-----------------------------------------------------------------------
-    static const char* operationTypeToString(RenderOperation::OperationType val)
-    {
-        switch (val)
-        {
-        case RenderOperation::OT_POINT_LIST:
-            return "point_list";
-            break;
-        case RenderOperation::OT_LINE_LIST:
-            return "line_list";
-            break;
-        case RenderOperation::OT_LINE_STRIP:
-            return "line_strip";
-            break;
-        case RenderOperation::OT_TRIANGLE_STRIP:
-            return "triangle_strip";
-            break;
-        case RenderOperation::OT_TRIANGLE_FAN:
-            return "triangle_fan";
-            break;
-        case RenderOperation::OT_TRIANGLE_LIST:
-        default:
-            return "triangle_list";
-            break;
         }
     }
     //-----------------------------------------------------------------------
@@ -273,38 +154,5 @@ namespace Ogre {
     void GLSLShaderCommon::CmdColumnMajorMatrices::doSet(void *target, const String& val)
     {
         static_cast<GLSLShaderCommon*>(target)->setColumnMajorMatrices(StringConverter::parseBool(val));
-    }
-    //-----------------------------------------------------------------------
-    String GLSLShaderCommon::CmdInputOperationType::doGet(const void* target) const
-    {
-        const GLSLShaderCommon* t = static_cast<const GLSLShaderCommon*>(target);
-        return operationTypeToString(t->getInputOperationType());
-    }
-    void GLSLShaderCommon::CmdInputOperationType::doSet(void* target, const String& val)
-    {
-        GLSLShaderCommon* t = static_cast<GLSLShaderCommon*>(target);
-        t->setInputOperationType(parseOperationType(val));
-    }
-    //-----------------------------------------------------------------------
-    String GLSLShaderCommon::CmdOutputOperationType::doGet(const void* target) const
-    {
-        const GLSLShaderCommon* t = static_cast<const GLSLShaderCommon*>(target);
-        return operationTypeToString(t->getOutputOperationType());
-    }
-    void GLSLShaderCommon::CmdOutputOperationType::doSet(void* target, const String& val)
-    {
-        GLSLShaderCommon* t = static_cast<GLSLShaderCommon*>(target);
-        t->setOutputOperationType(parseOperationType(val));
-    }
-    //-----------------------------------------------------------------------
-    String GLSLShaderCommon::CmdMaxOutputVertices::doGet(const void* target) const
-    {
-        const GLSLShaderCommon* t = static_cast<const GLSLShaderCommon*>(target);
-        return StringConverter::toString(t->getMaxOutputVertices());
-    }
-    void GLSLShaderCommon::CmdMaxOutputVertices::doSet(void* target, const String& val)
-    {
-        GLSLShaderCommon* t = static_cast<GLSLShaderCommon*>(target);
-        t->setMaxOutputVertices(StringConverter::parseInt(val));
     }
 }

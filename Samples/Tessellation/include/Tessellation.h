@@ -22,11 +22,6 @@ class _OgreSampleClassExport Sample_Tessellation : public SdkSample
 
     void testCapabilities(const RenderSystemCapabilities* caps)
     {
-        if (!caps->hasCapability(RSC_VERTEX_PROGRAM) || !caps->hasCapability(RSC_FRAGMENT_PROGRAM))
-        {
-            OGRE_EXCEPT(Exception::ERR_NOT_IMPLEMENTED, "Your graphics card does not support vertex and fragment"
-                        " programs, so you cannot run this sample. Sorry!", "Sample_Tessellation::testCapabilities");
-        }
         if (!caps->hasCapability(RSC_TESSELLATION_HULL_PROGRAM) || !caps->hasCapability(RSC_TESSELLATION_DOMAIN_PROGRAM))
         {
             OGRE_EXCEPT(Exception::ERR_INVALID_STATE, "Your graphics card does not support tessellation shaders. Sorry!",
@@ -49,30 +44,21 @@ class _OgreSampleClassExport Sample_Tessellation : public SdkSample
     {
         // set our camera
         mTrayMgr->showCursor();
+        mCameraNode->setPosition(0, 0, 20);
         mCameraMan->setStyle(CS_ORBIT);
-
-        mCameraNode->setPosition(0, 5, -30);
-        mCamera->setPolygonMode(PM_WIREFRAME);
-
-        // create material and set the texture unit to our texture
-        MaterialPtr tMat = static_pointer_cast<Material>(MaterialManager::getSingleton().createOrRetrieve("Ogre/TessellationExample", ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME).first);
-        tMat->compile();
-        tMat->getBestTechnique()->getPass(0);
 
         // create a plain with float3 tex cord
         ManualObject* tObject = mSceneMgr->createManualObject("TesselatedObject");
 
         // create a triangle that uses our material
-        tObject->begin(tMat->getName(), RenderOperation::OT_TRIANGLE_LIST);
-        tObject->position(10, 10, 0);
+        tObject->begin("Ogre/TessellationExample", RenderOperation::OT_TRIANGLE_LIST);
+        tObject->position(-10, -10, 0);
         tObject->position(0, 10, 0);
-        tObject->position(0, 0, 0);
-        //tObject->triangle(0, 1, 2);
+        tObject->position(10, -10, 0);
         tObject->end();
 
         // attach it to a node and position appropriately
-        SceneNode* node = mSceneMgr->getRootSceneNode()->createChildSceneNode();
-        node->attachObject(tObject);
+        mSceneMgr->getRootSceneNode()->createChildSceneNode()->attachObject(tObject);
     }
 };
 

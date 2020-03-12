@@ -14,6 +14,8 @@ same license as the rest of the engine.
 
 #include "DLight.h"
 
+#include <cmath>
+
 #include "OgreHardwareBufferManager.h"
 #include "OgreCamera.h"
 #include "OgreSceneNode.h"
@@ -66,7 +68,7 @@ void DLight::setAttenuation(float c, float b, float a)
 
             //// Use quadratic formula to determine outer radius
             c = c-threshold;
-            float d=sqrt(b*b-4*a*c);
+            float d=std::sqrt(b*b-4*a*c);
             outerRadius = (-2*c)/(b+d);
             outerRadius *= 1.2;
         }
@@ -332,7 +334,9 @@ void DLight::updateFromCamera(Ogre::Camera* camera)
             }
         }
 
+        SceneNode dummyNode(NULL);
         Camera shadowCam("ShadowCameraSetupCam", 0);
+        shadowCam._notifyAttached(&dummyNode);
         shadowCam._notifyViewport(camera->getViewport());
         SceneManager* sm = mParentLight->_getManager();
         sm->getShadowCameraSetup()->getShadowCamera(sm, 

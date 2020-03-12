@@ -71,7 +71,7 @@ namespace Ogre
     class _OgreExport WorkQueue : public UtilityAlloc
     {
     protected:
-        typedef map<String, uint16>::type ChannelMap;
+        typedef std::map<String, uint16> ChannelMap;
         ChannelMap mChannelMap;
         uint16 mNextChannel;
         OGRE_WQ_MUTEX(mChannelMapMutex);
@@ -143,7 +143,7 @@ namespace Ogre
             /// Return the response data (user defined, only valid on success)
             const Any& getData() const { return mData; }
             /// Abort the request
-            void abortRequest() { mRequest->abortRequest(); mData.destroy(); }
+            void abortRequest() { mRequest->abortRequest(); mData.reset(); }
         };
 
         /** Interface definition for a handler of requests. 
@@ -184,7 +184,7 @@ namespace Ogre
             @return Pointer to a Response object - the caller is responsible
             for deleting the object.
             */
-            virtual Response* handleRequest(const Request* req, const WorkQueue* srcQ) = 0;
+            virtual Response* handleRequest(const Request* req, const WorkQueue* srcQ) OGRE_NODISCARD = 0;
         };
 
         /** Interface definition for a handler of responses. 
@@ -279,6 +279,15 @@ namespace Ogre
         @param id The ID of the previously issued request.
         */
         virtual void abortRequest(RequestID id) = 0;
+
+        /** Abort request if it is not being processed currently.
+         *
+         * @param id The ID of the previously issued request.
+         *
+         * @retval true If request was aborted successfully.
+         * @retval false If request is already being processed so it can not be aborted.
+         */
+        virtual bool abortPendingRequest(RequestID id) = 0;
 
         /** Abort all previously issued requests in a given channel.
         Any requests still waiting to be processed of the given channel, will be 
@@ -436,6 +445,8 @@ namespace Ogre
             bool forceSynchronous = false, bool idleThread = false);
         /// @copydoc WorkQueue::abortRequest
         virtual void abortRequest(RequestID id);
+        /// @copydoc WorkQueue::abortPendingRequest
+        virtual bool abortPendingRequest(RequestID id);
         /// @copydoc WorkQueue::abortRequestsByChannel
         virtual void abortRequestsByChannel(uint16 channel);
         /// @copydoc WorkQueue::abortPendingRequestsByChannel
@@ -463,8 +474,8 @@ namespace Ogre
         bool mIsRunning;
         unsigned long mResposeTimeLimitMS;
 
-        typedef deque<Request*>::type RequestQueue;
-        typedef deque<Response*>::type ResponseQueue;
+        typedef std::deque<Request*> RequestQueue;
+        typedef std::deque<Response*> ResponseQueue;
         RequestQueue mRequestQueue; // Guarded by mRequestMutex
         RequestQueue mProcessQueue; // Guarded by mProcessMutex
         ResponseQueue mResponseQueue; // Guarded by mResponseMutex
@@ -534,10 +545,10 @@ namespace Ogre
         // Hold these by shared pointer so they can be copied keeping same instance
         typedef SharedPtr<RequestHandlerHolder> RequestHandlerHolderPtr;
 
-        typedef list<RequestHandlerHolderPtr>::type RequestHandlerList;
-        typedef list<ResponseHandler*>::type ResponseHandlerList;
-        typedef map<uint16, RequestHandlerList>::type RequestHandlerListByChannel;
-        typedef map<uint16, ResponseHandlerList>::type ResponseHandlerListByChannel;
+        typedef std::list<RequestHandlerHolderPtr> RequestHandlerList;
+        typedef std::list<ResponseHandler*> ResponseHandlerList;
+        typedef std::map<uint16, RequestHandlerList> RequestHandlerListByChannel;
+        typedef std::map<uint16, ResponseHandlerList> ResponseHandlerListByChannel;
 
         RequestHandlerListByChannel mRequestHandlers;
         ResponseHandlerListByChannel mResponseHandlers;

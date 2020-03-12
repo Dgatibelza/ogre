@@ -39,7 +39,6 @@ namespace Ogre {
 #define OGRE_PLATFORM_APPLE 3
 #define OGRE_PLATFORM_APPLE_IOS 4
 #define OGRE_PLATFORM_ANDROID 5
-#define OGRE_PLATFORM_NACL 6
 #define OGRE_PLATFORM_WINRT 7
 #define OGRE_PLATFORM_EMSCRIPTEN 8
     
@@ -101,6 +100,19 @@ namespace Ogre {
         #define OGRE_FORCE_INLINE __inline
 #endif
 
+/* fallthrough attribute */
+#if OGRE_COMPILER_MIN_VERSION(OGRE_COMPILER_GNUC, 700)
+#define OGRE_FALLTHROUGH __attribute__((fallthrough))
+#else
+#define OGRE_FALLTHROUGH
+#endif
+
+#if OGRE_COMPILER == OGRE_COMPILER_GNUC || OGRE_COMPILER == OGRE_COMPILER_CLANG
+#define OGRE_NODISCARD __attribute__((__warn_unused_result__))
+#else
+#define OGRE_NODISCARD
+#endif
+
 /* define OGRE_NORETURN macro */
 #if OGRE_COMPILER == OGRE_COMPILER_MSVC
 #	define OGRE_NORETURN __declspec(noreturn)
@@ -126,9 +138,6 @@ namespace Ogre {
 #   define __OGRE_WINRT_STORE     (OGRE_PLATFORM == OGRE_PLATFORM_WINRT && WINAPI_FAMILY == WINAPI_FAMILY_APP)        // WindowsStore 8.0 and 8.1
 #   define __OGRE_WINRT_PHONE     (OGRE_PLATFORM == OGRE_PLATFORM_WINRT && WINAPI_FAMILY == WINAPI_FAMILY_PHONE_APP)  // WindowsPhone 8.0 and 8.1
 #   define __OGRE_WINRT_PHONE_80  (OGRE_PLATFORM == OGRE_PLATFORM_WINRT && WINAPI_FAMILY == WINAPI_FAMILY_PHONE_APP && _WIN32_WINNT <= _WIN32_WINNT_WIN8) // Windows Phone 8.0 often need special handling, while 8.1 is OK
-#   if defined(_WIN32_WINNT_WIN8) && _WIN32_WINNT >= _WIN32_WINNT_WIN8 // i.e. this is modern SDK and we compile for OS with guaranteed support for DirectXMath
-#       define __OGRE_HAVE_DIRECTXMATH 1
-#   endif
 #   ifndef _CRT_SECURE_NO_WARNINGS
 #       define _CRT_SECURE_NO_WARNINGS
 #   endif
@@ -138,39 +147,40 @@ namespace Ogre {
 #elif defined(__EMSCRIPTEN__)
 #   define OGRE_PLATFORM OGRE_PLATFORM_EMSCRIPTEN
 #elif defined( __APPLE_CC__)
-    // Device                                                     Simulator
-    // Both requiring OS version 6.0 or greater
-#   if __ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__ >= 60000 || __IPHONE_OS_VERSION_MIN_REQUIRED >= 60000
+#   include "Availability.h"
+#   ifdef __IPHONE_OS_VERSION_MIN_REQUIRED
 #       define OGRE_PLATFORM OGRE_PLATFORM_APPLE_IOS
 #   else
 #       define OGRE_PLATFORM OGRE_PLATFORM_APPLE
 #   endif
 #elif defined(__ANDROID__)
 #   define OGRE_PLATFORM OGRE_PLATFORM_ANDROID
-#elif defined( __native_client__ ) 
-#   define OGRE_PLATFORM OGRE_PLATFORM_NACL
-#   ifndef OGRE_STATIC_LIB
-#       error OGRE must be built as static for NaCl (OGRE_STATIC=true in CMake)
-#   endif
-#   ifdef OGRE_BUILD_RENDERSYSTEM_D3D9
-#       error D3D9 is not supported on NaCl (OGRE_BUILD_RENDERSYSTEM_D3D9 false in CMake)
-#   endif
-#   ifdef OGRE_BUILD_RENDERSYSTEM_GL
-#       error OpenGL is not supported on NaCl (OGRE_BUILD_RENDERSYSTEM_GL=false in CMake)
-#   endif
-#   ifndef OGRE_BUILD_RENDERSYSTEM_GLES2
-#       error GLES2 render system is required for NaCl (OGRE_BUILD_RENDERSYSTEM_GLES2=false in CMake)
-#   endif
 #else
 #   define OGRE_PLATFORM OGRE_PLATFORM_LINUX
 #endif
 
     /* Find the arch type */
-#if defined(__x86_64__) || defined(_M_X64) || defined(__powerpc64__) || defined(__alpha__) || defined(__ia64__) || defined(__s390__) || defined(__s390x__) || defined(__arm64__) || defined(__aarch64__) || defined(__mips64) || defined(__mips64_)
+#if defined(__x86_64__) || defined(_M_X64) || defined(_M_AMD64) || defined(_M_ARM64) || defined(__powerpc64__) || defined(__alpha__) || defined(__ia64__) || defined(__s390__) || defined(__s390x__) || defined(__arm64__) || defined(__aarch64__) || defined(__mips64) || defined(__mips64_)
 #   define OGRE_ARCH_TYPE OGRE_ARCHITECTURE_64
 #else
 #   define OGRE_ARCH_TYPE OGRE_ARCHITECTURE_32
 #endif
+
+/* Find how to declare aligned variable. */
+#if OGRE_COMPILER == OGRE_COMPILER_MSVC
+#   define OGRE_ALIGNED_DECL(type, var, alignment)  __declspec(align(alignment)) type var
+#elif (OGRE_COMPILER == OGRE_COMPILER_GNUC) || (OGRE_COMPILER == OGRE_COMPILER_CLANG)
+#   define OGRE_ALIGNED_DECL(type, var, alignment)  type var __attribute__((__aligned__(alignment)))
+#else
+#   define OGRE_ALIGNED_DECL(type, var, alignment)  type var
+#endif
+
+/** Find perfect alignment (should supports SIMD alignment if SIMD available) */
+#define OGRE_SIMD_ALIGNMENT 16
+
+/* Declare variable aligned to SIMD alignment. */
+#define OGRE_SIMD_ALIGNED_DECL(type, var)   OGRE_ALIGNED_DECL(type, var, OGRE_SIMD_ALIGNMENT)
+
 
 // For generating compiler warnings - should work on any compiler
 // As a side note, if you start your message with 'Warning: ', the MSVC
@@ -190,48 +200,14 @@ namespace Ogre {
 #endif
 
 // Win32 compilers use _DEBUG for specifying debug builds.
-// for MinGW, we set DEBUG
-#   if defined(_DEBUG) || defined(DEBUG)
+// for MinGW, we use NDEBUG
+#   if defined(_DEBUG) || (defined(__MINGW32__) && !defined(NDEBUG))
 #       define OGRE_DEBUG_MODE 1
 #   else
 #       define OGRE_DEBUG_MODE 0
 #   endif
 
-// Disable unicode support on MingW for GCC 3, poorly supported in stdlibc++
-// STLPORT fixes this though so allow if found
-// MinGW C++ Toolkit supports unicode and sets the define __MINGW32_TOOLBOX_UNICODE__ in _mingw.h
-// GCC 4 is also fine
-#if defined(__MINGW32__)
-# if OGRE_COMP_VER < 400
-#  if !defined(_STLPORT_VERSION)
-#   include<_mingw.h>
-#   if defined(__MINGW32_TOOLBOX_UNICODE__) || OGRE_COMP_VER > 345
-#    define OGRE_UNICODE_SUPPORT 1
-#   else
-#    define OGRE_UNICODE_SUPPORT 0
-#   endif
-#  else
-#   define OGRE_UNICODE_SUPPORT 1
-#  endif
-# else
-#  define OGRE_UNICODE_SUPPORT 1
-# endif
-#else
-#  define OGRE_UNICODE_SUPPORT 1
-#endif
-
 #endif // OGRE_PLATFORM == OGRE_PLATFORM_WIN32 || OGRE_PLATFORM == OGRE_PLATFORM_WINRT
-
-//----------------------------------------------------------------------------
-// Linux/Apple/iOS/Android/NaCl/Emscripten Settings
-#if OGRE_PLATFORM == OGRE_PLATFORM_LINUX || OGRE_PLATFORM == OGRE_PLATFORM_APPLE || OGRE_PLATFORM == OGRE_PLATFORM_APPLE_IOS || \
-    OGRE_PLATFORM == OGRE_PLATFORM_ANDROID || OGRE_PLATFORM == OGRE_PLATFORM_NACL || OGRE_PLATFORM == OGRE_PLATFORM_EMSCRIPTEN
-
-// Always enable unicode support for the moment
-// Perhaps disable in old versions of gcc if necessary
-#define OGRE_UNICODE_SUPPORT 1
-
-#endif
 
 //----------------------------------------------------------------------------
 // Android Settings
@@ -239,10 +215,6 @@ namespace Ogre {
 #   ifndef CLOCKS_PER_SEC
 #       define CLOCKS_PER_SEC  1000
 #   endif
-#endif
-
-#ifndef __OGRE_HAVE_DIRECTXMATH
-#   define __OGRE_HAVE_DIRECTXMATH 0
 #endif
 
 //----------------------------------------------------------------------------
@@ -266,7 +238,7 @@ namespace Ogre {
 //----------------------------------------------------------------------------
 // Library suffixes
 // "_d" for debug builds, nothing otherwise
-#if OGRE_DEBUG_MODE
+#if OGRE_DEBUG_MODE && OGRE_PLATFORM == OGRE_PLATFORM_WIN32
 #   define OGRE_BUILD_SUFFIX "_d"
 #else
 #   define OGRE_BUILD_SUFFIX ""
@@ -276,37 +248,6 @@ namespace Ogre {
 #define DECL_MALLOC __declspec(restrict) __declspec(noalias)
 #else
 #define DECL_MALLOC __attribute__ ((malloc))
-#endif
-
-// Stack-alignment hackery.
-//
-// If macro __OGRE_SIMD_ALIGN_STACK defined, means there requests
-// special code to ensure stack align to a 16-bytes boundary.
-//
-// Note:
-//   This macro can only guarantee callee stack pointer (esp) align
-// to a 16-bytes boundary, but not that for frame pointer (ebp).
-// Because most compiler might use frame pointer to access to stack
-// variables, so you need to wrap those alignment required functions
-// with extra function call.
-//
-#if defined(__INTEL_COMPILER)
-// For intel's compiler, simply calling alloca seems to do the right
-// thing. The size of the allocated block seems to be irrelevant.
-#define _OGRE_SIMD_ALIGN_STACK()   _alloca(16)
-#define _OGRE_SIMD_ALIGN_ATTRIBUTE
-
-#elif OGRE_CPU == OGRE_CPU_X86 && (OGRE_COMPILER == OGRE_COMPILER_GNUC || OGRE_COMPILER == OGRE_COMPILER_CLANG) && (OGRE_ARCH_TYPE != OGRE_ARCHITECTURE_64)
-// mark functions with GCC attribute to force stack alignment to 16 bytes
-#define _OGRE_SIMD_ALIGN_ATTRIBUTE __attribute__((force_align_arg_pointer))
-
-#elif defined(_MSC_VER)
-// Fortunately, MSVC will align the stack automatically
-#define _OGRE_SIMD_ALIGN_ATTRIBUTE
-
-#else
-#define _OGRE_SIMD_ALIGN_ATTRIBUTE
-
 #endif
 
 // Integer formats of fixed bit width

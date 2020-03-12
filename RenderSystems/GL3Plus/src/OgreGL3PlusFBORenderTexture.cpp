@@ -36,7 +36,6 @@ Copyright (c) 2000-2014 Torus Knot Software Ltd
 #include "OgreGL3PlusStateCacheManager.h"
 
 namespace Ogre {
-    static const size_t TEMP_FBOS = 2;
 
     GL3PlusFBORenderTexture::GL3PlusFBORenderTexture(
         GL3PlusFBOManager *manager, const String &name,
@@ -57,6 +56,10 @@ namespace Ogre {
         if(name == GLRenderTexture::CustomAttributeString_FBO)
         {
             *static_cast<GL3PlusFrameBufferObject **>(pData) = &mFB;
+        }
+        else if(name == GLRenderTexture::CustomAttributeString_GLCONTEXT)
+        {
+            *static_cast<GLContext**>(pData) = getContext();
         }
         else if (name == "GL_FBOID")
         {
@@ -106,7 +109,7 @@ namespace Ogre {
             GL_STENCIL_INDEX8,
             GL_STENCIL_INDEX16
         };
-    static const size_t stencilBits[] =
+    static const uchar stencilBits[] =
         {
             0, 1, 4, 8, 16
         };
@@ -122,7 +125,7 @@ namespace Ogre {
             GL_DEPTH24_STENCIL8,    // Packed depth / stencil
             GL_DEPTH32F_STENCIL8
         };
-    static const size_t depthBits[] =
+    static const uchar depthBits[] =
         {
             0,16,24,32,32,24,32
         };
@@ -131,26 +134,13 @@ namespace Ogre {
     GL3PlusFBOManager::GL3PlusFBOManager(GL3PlusRenderSystem* renderSystem) : mRenderSystem(renderSystem)
     {
         detectFBOFormats();
-
-        mTempFBO.resize(Ogre::TEMP_FBOS, 0);
-
-        for (size_t i = 0; i < Ogre::TEMP_FBOS; i++)
-        {
-            OGRE_CHECK_GL_ERROR(glGenFramebuffers(1, &mTempFBO[i]));
-        }
     }
 
     GL3PlusFBOManager::~GL3PlusFBOManager()
     {
         if(!mRenderBufferMap.empty())
         {
-            LogManager::getSingleton().logMessage("GL: Warning! GL3PlusFBOManager destructor called, but not all renderbuffers were released.", LML_CRITICAL);
-        }
-
-        if(GL3PlusStateCacheManager* stateCacheManager = mRenderSystem->_getStateCacheManager())
-        {
-            for (size_t i = 0; i < Ogre::TEMP_FBOS; i++)
-                stateCacheManager->deleteGLFrameBuffer(GL_FRAMEBUFFER,mTempFBO[i]);
+            LogManager::getSingleton().logWarning("GL3PlusFBOManager destructor called, but not all renderbuffers were released.");
         }
     }
 
@@ -159,7 +149,7 @@ namespace Ogre {
         return mRenderSystem->_getStateCacheManager();
     }
 
-    void GL3PlusFBOManager::_createTempFramebuffer(int ogreFormat, GLuint internalFormat, GLuint fmt, GLenum dataType, GLuint &fb, GLuint &tid)
+    void GL3PlusFBOManager::_createTempFramebuffer(GLuint internalFormat, GLuint fmt, GLenum dataType, GLuint &fb, GLuint &tid)
     {
         OGRE_CHECK_GL_ERROR(glGenFramebuffers(1, &fb));
         mRenderSystem->_getStateCacheManager()->bindGLFrameBuffer( GL_DRAW_FRAMEBUFFER, fb );
@@ -185,14 +175,9 @@ namespace Ogre {
 
             OGRE_CHECK_GL_ERROR(glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, PROBE_SIZE, PROBE_SIZE, 0, fmt, dataType, 0));
 
-            if (ogreFormat == PF_DEPTH)
-            {
-                OGRE_CHECK_GL_ERROR(glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, tid, 0));
-            }
-            else
-            {
-                OGRE_CHECK_GL_ERROR(glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tid, 0));
-            }
+            OGRE_CHECK_GL_ERROR(glFramebufferTexture2D(
+                GL_DRAW_FRAMEBUFFER, fmt == GL_DEPTH_COMPONENT ? GL_DEPTH_ATTACHMENT : GL_COLOR_ATTACHMENT0,
+                GL_TEXTURE_2D, tid, 0));
         }
         else
         {
@@ -331,7 +316,7 @@ namespace Ogre {
                 formatSupported = params == GL_FULL_SUPPORT;
             } else {
                 // Create and attach framebuffer
-                _createTempFramebuffer(x, internalFormat, originFormat, dataType, fb, tid);
+                _createTempFramebuffer(internalFormat, originFormat, dataType, fb, tid);
 
                 // Check status
                 GLuint status;
@@ -350,7 +335,7 @@ namespace Ogre {
                     << " depth/stencil support: ";
 
                 // For each depth/stencil formats
-                for (size_t depth = 0; depth < DEPTHFORMAT_COUNT; ++depth)
+                for (uchar depth = 0; depth < DEPTHFORMAT_COUNT; ++depth)
                 {
                     if ((depthFormats[depth] != GL_DEPTH24_STENCIL8) && (depthFormats[depth] != GL_DEPTH32F_STENCIL8))
                     {
@@ -366,7 +351,7 @@ namespace Ogre {
                             }
                         }
 
-                        for (size_t stencil = 0; stencil < STENCILFORMAT_COUNT; ++stencil)
+                        for (uchar stencil = 0; stencil < STENCILFORMAT_COUNT; ++stencil)
                         {
                             //                            StringStream l;
                             //                            l << "Trying " << PixelUtil::getFormatName((PixelFormat)x)
@@ -387,7 +372,7 @@ namespace Ogre {
                             if (formatSupported)
                             {
                                 // Add mode to allowed modes
-                                str << "D" << depthBits[depth] << "S" << stencilBits[stencil] << " ";
+                                str << StringUtil::format("D%dS%d ", depthBits[depth], stencilBits[stencil]);
                                 FormatProperties::Mode mode = {depth, stencil};
                                 mProps[x].modes.push_back(mode);
                             }
@@ -408,7 +393,7 @@ namespace Ogre {
                         if (formatSupported)
                         {
                             // Add mode to allowed modes
-                            str << "Packed-D" << depthBits[depth] << "S" << 8 << " ";
+                            str << "Packed-D" << int(depthBits[depth]) << "S8 ";
                             FormatProperties::Mode mode = {depth, 0}; // stencil unused
                             mProps[x].modes.push_back(mode);
                         }
@@ -447,7 +432,7 @@ namespace Ogre {
         // [best supported for internal format]
         size_t bestmode=0;
         int bestscore=-1;
-        bool requestDepthOnly = internalFormat == PF_DEPTH;
+        bool requestDepthOnly = PixelUtil::isDepth(internalFormat);
         for(size_t mode=0; mode<props.modes.size(); mode++)
         {
             int desirability = 0;
@@ -474,10 +459,7 @@ namespace Ogre {
             }
         }
         *depthFormat = depthFormats[props.modes[bestmode].depth];
-        if(requestDepthOnly)
-            *stencilFormat = 0;
-        else
-            *stencilFormat = stencilFormats[props.modes[bestmode].stencil];
+        *stencilFormat = requestDepthOnly ? 0 : stencilFormats[props.modes[bestmode].stencil];
     }
 
     GL3PlusFBORenderTexture *GL3PlusFBOManager::createRenderTexture(const String &name,
@@ -485,22 +467,6 @@ namespace Ogre {
     {
         GL3PlusFBORenderTexture *retval = new GL3PlusFBORenderTexture(this, name, target, writeGamma, fsaa);
         return retval;
-    }
-    MultiRenderTarget *GL3PlusFBOManager::createMultiRenderTarget(const String & name)
-    {
-        return new GL3PlusFBOMultiRenderTarget(this, name);
-    }
-
-    void GL3PlusFBOManager::bind(RenderTarget *target)
-    {
-        // Check if the render target is in the rendertarget->FBO map
-        GL3PlusFrameBufferObject *fbo = 0;
-        target->getCustomAttribute(GLRenderTexture::CustomAttributeString_FBO, &fbo);
-        if(fbo)
-            fbo->bind();
-        else
-            // Old style context (window/pbuffer) or copying render texture
-            mRenderSystem->_getStateCacheManager()->bindGLFrameBuffer( GL_FRAMEBUFFER, 0 );
     }
 
     GLSurfaceDesc GL3PlusFBOManager::requestRenderBuffer(GLenum format, uint32 width, uint32 height, uint fsaa)
@@ -533,10 +499,4 @@ namespace Ogre {
         return retval;
     }
 
-    GLuint GL3PlusFBOManager::getTemporaryFBO(size_t i)
-    {
-        assert(i < mTempFBO.size());
-
-        return mTempFBO[i];
-    }
 }

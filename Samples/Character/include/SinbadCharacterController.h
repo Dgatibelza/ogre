@@ -7,7 +7,6 @@
 using namespace Ogre;
 using namespace OgreBites;
 
-#define NUM_ANIMS 13           // number of animations the character has
 #define CHAR_HEIGHT 5          // height of character's center of mass above ground
 #define CAM_HEIGHT 2           // height of camera above character's center of mass
 #define RUN_SPEED 17           // character running speed in units per second
@@ -37,7 +36,8 @@ private:
         ANIM_JUMP_START,
         ANIM_JUMP_LOOP,
         ANIM_JUMP_END,
-        ANIM_NONE
+        NUM_ANIMS,
+        ANIM_NONE = NUM_ANIMS
     };
 
 public:
@@ -133,7 +133,7 @@ public:
     void injectMouseWheel(const MouseWheelEvent& evt)
     {
         // update camera goal based on mouse movement
-        updateCameraGoal(0, 0, -0.0005f * evt.y);
+        updateCameraGoal(0, 0, -0.05f * evt.y);
     }
 
     void injectMouseDown(const MouseButtonEvent& evt)
@@ -450,7 +450,7 @@ private:
 
     void setBaseAnimation(AnimID id, bool reset = false)
     {
-        if (mBaseAnimID >= 0 && mBaseAnimID < NUM_ANIMS)
+        if (mBaseAnimID != ANIM_NONE)
         {
             // if we have an old animation, fade it out
             mFadingIn[mBaseAnimID] = false;
@@ -472,7 +472,7 @@ private:
 
     void setTopAnimation(AnimID id, bool reset = false)
     {
-        if (mTopAnimID >= 0 && mTopAnimID < NUM_ANIMS)
+        if (mTopAnimID != ANIM_NONE)
         {
             // if we have an old animation, fade it out
             mFadingIn[mTopAnimID] = false;

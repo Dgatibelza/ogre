@@ -28,8 +28,7 @@ THE SOFTWARE.
 
 #include "OgreGLSLESLinkProgram.h"
 #include "OgreGLSLESProgram.h"
-#include "OgreGLSLESProgram.h"
-#include "OgreGLSLESLinkProgramManager.h"
+#include "OgreGLSLESProgramManager.h"
 #include "OgreGLES2HardwareUniformBuffer.h"
 #include "OgreLogManager.h"
 #include "OgreGpuProgramManager.h"
@@ -37,20 +36,14 @@ THE SOFTWARE.
 #include "OgreRoot.h"
 #include "OgreGLUtil.h"
 #include "OgreGLES2RenderSystem.h"
-#include "OgreGLES2Support.h"
+#include "OgreGLNativeSupport.h"
 
 namespace Ogre {
 
     //-----------------------------------------------------------------------
-    GLSLESLinkProgram::GLSLESLinkProgram(GLSLESProgram* vertexProgram, GLSLESProgram* fragmentProgram)
-    : GLSLESProgramCommon(vertexProgram, fragmentProgram)
+    GLSLESLinkProgram::GLSLESLinkProgram(const GLShaderList& shaders)
+    : GLSLESProgramCommon(shaders)
     {
-        if ((!getVertexProgram() || !mFragmentProgram))
-        {
-            OGRE_EXCEPT(Exception::ERR_RENDERINGAPI_ERROR,
-                        "Attempted to create a shader program without both a vertex and fragment program.",
-                        "GLSLESLinkProgram::GLSLESLinkProgram");
-        }
     }
 
     //-----------------------------------------------------------------------
@@ -70,13 +63,15 @@ namespace Ogre {
     //-----------------------------------------------------------------------
     void GLSLESLinkProgram::activate(void)
     {
-        if (!mLinked && !mTriedToLinkAndFailed)
+        if (!mLinked)
         {
             glGetError(); // Clean up the error. Otherwise will flood log.
 
             OGRE_CHECK_GL_ERROR(mGLProgramHandle = glCreateProgram());
 
-            if (!getMicrocodeFromCache(getCombinedName(), mGLProgramHandle))
+            uint32 hash = getCombinedHash();
+            mLinked = getMicrocodeFromCache(hash, mGLProgramHandle);
+            if (!mLinked)
             {
 #if !OGRE_NO_GLES2_GLSL_OPTIMISER
                 // Check CmdParams for each shader type to see if we should optimize
@@ -101,13 +96,12 @@ namespace Ogre {
                 compileAndLink();
 
 #if !OGRE_NO_GLES2_GLSL_OPTIMISER
+                // TODO: we will never reach this - move to GLSLESProgram
                 // Try it again when we used the optimised versions
-                if(mTriedToLinkAndFailed && 
-                    mVertexProgram->getGLSLProgram()->getOptimiserEnabled() && 
+                if(mVertexProgram->getGLSLProgram()->getOptimiserEnabled() && 
                     mFragmentProgram->getGLSLProgram()->getOptimiserEnabled())
                 {
                     LogManager::getSingleton().stream() << "Try not optimised shader."; 
-                    mTriedToLinkAndFailed = false;
                     mVertexProgram->getGLSLProgram()->setOptimiserEnabled(false);
                     mFragmentProgram->getGLSLProgram()->setOptimiserEnabled(false);
                     compileAndLink();
@@ -128,50 +122,29 @@ namespace Ogre {
     //-----------------------------------------------------------------------
     void GLSLESLinkProgram::compileAndLink()
     {
-        // Compile and attach Vertex Program
-        if(!getVertexProgram()->compile(true)) {
-            LogManager::getSingleton().stream(LML_CRITICAL)
-                    << "Vertex Program " << getVertexProgram()->getName()
-                    << " failed to compile. See compile log above for details.";
-            mTriedToLinkAndFailed = true;
-            return;
-        }
+        uint32 hash = getCombinedHash();
 
-        getVertexProgram()->attachToProgramObject(mGLProgramHandle);
-        setSkeletalAnimationIncluded(getVertexProgram()->isSkeletalAnimationIncluded());
-        
-        // Compile and attach Fragment Program
-        if(!mFragmentProgram->compile(true)) {
-            LogManager::getSingleton().stream(LML_CRITICAL)
-                    << "Vertex Program " << mFragmentProgram->getName()
-                    << " failed to compile. See compile log above for details.";
-            mTriedToLinkAndFailed = true;
-            return;
-        }
-
-        mFragmentProgram->attachToProgramObject(mGLProgramHandle);
+        // attach Vertex Program
+        mShaders[GPT_VERTEX_PROGRAM]->attachToProgramObject(mGLProgramHandle);
+        // attach Fragment Program
+        mShaders[GPT_FRAGMENT_PROGRAM]->attachToProgramObject(mGLProgramHandle);
         
         bindFixedAttributes( mGLProgramHandle );
 
         // The link
         OGRE_CHECK_GL_ERROR(glLinkProgram( mGLProgramHandle ));
         OGRE_CHECK_GL_ERROR(glGetProgramiv( mGLProgramHandle, GL_LINK_STATUS, &mLinked ));
-        mTriedToLinkAndFailed = !mLinked;
 
         GLSLES::logObjectInfo( getCombinedName() + String("GLSL link result : "), mGLProgramHandle );
 
         const RenderSystemCapabilities* caps = Root::getSingleton().getRenderSystem()->getCapabilities();
 
-#if OGRE_PLATFORM != OGRE_PLATFORM_NACL
         if(caps->hasCapability(RSC_SEPARATE_SHADER_OBJECTS))
         {
             if(glIsProgramPipelineEXT(mGLProgramHandle))
                 glValidateProgramPipelineEXT(mGLProgramHandle);
         }
         else if(glIsProgram(mGLProgramHandle))
-#else
-        if(glIsProgram(mGLProgramHandle))
-#endif
         {
             glValidateProgram(mGLProgramHandle);
         }
@@ -180,7 +153,7 @@ namespace Ogre {
 
         if(mLinked)
         {
-            _writeToCache(getCombinedName(), mGLProgramHandle);
+            _writeToCache(hash, mGLProgramHandle);
         }
     }
 
@@ -191,17 +164,17 @@ namespace Ogre {
         {
             const GpuConstantDefinitionMap* vertParams = 0;
             const GpuConstantDefinitionMap* fragParams = 0;
-            if (getVertexProgram())
+            if (mShaders[GPT_VERTEX_PROGRAM])
             {
-                vertParams = &(getVertexProgram()->getConstantDefinitions().map);
+                vertParams = &(mShaders[GPT_VERTEX_PROGRAM]->getConstantDefinitions().map);
             }
-            if (mFragmentProgram)
+            if (mShaders[GPT_FRAGMENT_PROGRAM])
             {
-                fragParams = &(mFragmentProgram->getConstantDefinitions().map);
+                fragParams = &(mShaders[GPT_FRAGMENT_PROGRAM]->getConstantDefinitions().map);
             }
 
-            GLSLESLinkProgramManager::extractUniforms(
-                mGLProgramHandle, vertParams, fragParams, mGLUniformReferences, mGLUniformBufferReferences);
+            GLSLESProgramManager::extractUniforms(mGLProgramHandle, vertParams, fragParams,
+                                                  mGLUniformReferences);
 
             mUniformRefsBuilt = true;
         }
@@ -230,7 +203,7 @@ namespace Ogre {
                     bool shouldUpdate = true;
 
                     // this is a monolitic program so we can use the cache of any attached shader
-                    GLUniformCache* uniformCache =  mVertexShader->getUniformCache();
+                    GLUniformCache* uniformCache =  mShaders[GPT_VERTEX_PROGRAM]->getUniformCache();
                     switch (def->constType)
                     {
                         case GCT_INT1:
@@ -288,7 +261,6 @@ namespace Ogre {
                         OGRE_CHECK_GL_ERROR(glUniformMatrix4fv(currentUniform->mLocation, glArraySize, 
                                                                GL_FALSE, params->getFloatPointer(def->physicalIndex)));
                         break;
-#if OGRE_NO_GLES3_SUPPORT == 0
                     case GCT_MATRIX_2X3:
                         OGRE_CHECK_GL_ERROR(glUniformMatrix2x3fv(currentUniform->mLocation, glArraySize,
                                                                  GL_FALSE, params->getFloatPointer(def->physicalIndex)));
@@ -313,15 +285,14 @@ namespace Ogre {
                         OGRE_CHECK_GL_ERROR(glUniformMatrix4x3fv(currentUniform->mLocation, glArraySize, 
                                                                  GL_FALSE, params->getFloatPointer(def->physicalIndex)));
                         break;
-#else
-                    case GCT_MATRIX_2X3:
-                    case GCT_MATRIX_2X4:
-                    case GCT_MATRIX_3X2:
-                    case GCT_MATRIX_3X4:
-                    case GCT_MATRIX_4X2:
-                    case GCT_MATRIX_4X3:
-                        break;
-#endif
+                    case GCT_SAMPLER1D:
+                    case GCT_SAMPLER1DSHADOW:
+                    case GCT_SAMPLER2D:
+                    case GCT_SAMPLER2DSHADOW:
+                    case GCT_SAMPLER3D:
+                    case GCT_SAMPLERCUBE:
+                    case GCT_SAMPLER2DARRAY:
+                        // Samplers handled like 1-element ints
                     case GCT_INT1:
                         OGRE_CHECK_GL_ERROR(glUniform1iv(currentUniform->mLocation, glArraySize,
                                                          (GLint*)params->getIntPointer(def->physicalIndex)));
@@ -338,17 +309,6 @@ namespace Ogre {
                         OGRE_CHECK_GL_ERROR(glUniform4iv(currentUniform->mLocation, glArraySize, 
                                                          (GLint*)params->getIntPointer(def->physicalIndex)));
                         break;
-                    case GCT_SAMPLER1D:
-                    case GCT_SAMPLER1DSHADOW:
-                    case GCT_SAMPLER2D:
-                    case GCT_SAMPLER2DSHADOW:
-                    case GCT_SAMPLER3D:
-                    case GCT_SAMPLERCUBE:
-                        // Samplers handled like 1-element ints
-                        OGRE_CHECK_GL_ERROR(glUniform1iv(currentUniform->mLocation, 1, 
-                                                         (GLint*)params->getIntPointer(def->physicalIndex)));
-                        break;
-                    case GCT_SAMPLER2DARRAY:
                     case GCT_UNKNOWN:
                     case GCT_SUBROUTINE:
                     case GCT_DOUBLE1:
@@ -373,57 +333,5 @@ namespace Ogre {
             } // fromProgType == currentUniform->mSourceProgType
   
         } // End for
-    }
-    //-----------------------------------------------------------------------
-    void GLSLESLinkProgram::updateUniformBlocks(GpuProgramParametersSharedPtr params,
-                                              uint16 mask, GpuProgramType fromProgType)
-    {
-#if OGRE_NO_GLES3_SUPPORT == 0
-        // Iterate through the list of uniform buffers and update them as needed
-        GLUniformBufferIterator currentBuffer = mGLUniformBufferReferences.begin();
-        GLUniformBufferIterator endBuffer = mGLUniformBufferReferences.end();
-
-        const GpuProgramParameters::GpuSharedParamUsageList& sharedParams = params->getSharedParameters();
-
-        GpuProgramParameters::GpuSharedParamUsageList::const_iterator it, end = sharedParams.end();
-        for (it = sharedParams.begin(); it != end; ++it)
-        {
-            for (;currentBuffer != endBuffer; ++currentBuffer)
-            {
-                GLES2HardwareUniformBuffer* hwGlBuffer = static_cast<GLES2HardwareUniformBuffer*>(currentBuffer->get());
-                GpuSharedParametersPtr paramsPtr = it->getSharedParams();
-
-                // Block name is stored in mSharedParams->mName of GpuSharedParamUsageList items
-                GLint UniformTransform;
-                OGRE_CHECK_GL_ERROR(UniformTransform = glGetUniformBlockIndex(mGLProgramHandle, it->getName().c_str()));
-                OGRE_CHECK_GL_ERROR(glUniformBlockBinding(mGLProgramHandle, UniformTransform, hwGlBuffer->getGLBufferBinding()));
-
-                hwGlBuffer->writeData(0, hwGlBuffer->getSizeInBytes(), &paramsPtr->getFloatConstantList().front());
-            }
-        }
-#endif
-    }
-    //-----------------------------------------------------------------------
-    void GLSLESLinkProgram::updatePassIterationUniforms(GpuProgramParametersSharedPtr params)
-    {
-        if (params->hasPassIterationNumber())
-        {
-            size_t index = params->getPassIterationNumberIndex();
-
-            GLUniformReferenceIterator currentUniform = mGLUniformReferences.begin();
-            GLUniformReferenceIterator endUniform = mGLUniformReferences.end();
-
-            // Need to find the uniform that matches the multi pass entry
-            for (;currentUniform != endUniform; ++currentUniform)
-            {
-                // Get the index in the parameter real list
-                if (index == currentUniform->mConstantDef->physicalIndex)
-                {
-                    OGRE_CHECK_GL_ERROR(glUniform1fv(currentUniform->mLocation, 1, params->getFloatPointer(index)));
-                    // There will only be one multipass entry
-                    return;
-                }
-            }
-        }
     }
 } // namespace Ogre

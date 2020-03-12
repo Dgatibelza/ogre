@@ -75,13 +75,11 @@ namespace Ogre {
 
         // State variables for rendering WIP
         // Set of face groups (by index) already included
-        typedef set<int>::type FaceGroupSet;
+        typedef std::set<int> FaceGroupSet;
         FaceGroupSet mFaceGroupSet;
         // Material -> face group hashmap
-        typedef map<Material*, vector<StaticFaceGroup*>::type, materialLess >::type MaterialFaceGroupMap;
+        typedef std::map<Material*, std::vector<StaticFaceGroup*>, materialLess > MaterialFaceGroupMap;
         MaterialFaceGroupMap mMatFaceGroupMap;
-
-        RenderOperation mRenderOp;
 
         // Debugging features
         bool mShowNodeAABs;
@@ -98,12 +96,6 @@ namespace Ogre {
         void processVisibleLeaf(BspNode* leaf, Camera* cam, 
             VisibleObjectsBoundsInfo* visibleBounds, bool onlyShadowCasters);
 
-        /** Caches a face group for imminent rendering. */
-        unsigned int cacheGeometry(unsigned int* pIndexes, const StaticFaceGroup* faceGroup);
-
-        /** Frees up allocated memory for geometry caches. */
-        void freeMemory(void);
-
         /** Adds a bounding box to draw if turned on. */
         void addBoundingBox(const AxisAlignedBox& aab, bool visible);
 
@@ -116,7 +108,7 @@ namespace Ogre {
         // Overridden so we can manually render world geometry
         bool fireRenderQueueEnded(uint8 id, const String& invocation);
 
-        typedef set<const MovableObject*>::type MovablesForRendering;
+        typedef std::set<const MovableObject*> MovablesForRendering;
         MovablesForRendering mMovablesForRendering;
 
     public:
@@ -150,6 +142,8 @@ namespace Ogre {
         ViewPoint getSuggestedViewpoint(bool random = false);
 
         const BspLevelPtr& getLevel(void) {return mLevel; }
+
+        void setLevel(const BspLevelPtr& level);
 
         /** Overridden from SceneManager. */
         void _findVisibleObjects(Camera* cam, VisibleObjectsBoundsInfo* visibleBounds, 
@@ -249,9 +243,9 @@ namespace Ogre {
         void execute(RaySceneQueryListener* listener);
     protected:
         /// Set for eliminating duplicates since objects can be in > 1 node
-        set<MovableObject*>::type mObjsThisQuery;
+        std::set<MovableObject*> mObjsThisQuery;
         /// list of the last single intersection world fragments (derived)
-        vector<SceneQuery::WorldFragment*>::type mSingleIntersections;
+        std::vector<SceneQuery::WorldFragment*> mSingleIntersections;
 
         void clearTemporaries(void);
         /** Internal processing of a single node.

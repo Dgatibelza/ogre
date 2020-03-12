@@ -6,8 +6,8 @@
  */
 
 #include "OgreAdvancedRenderControls.h"
-#include <OgreTextureManager.h>
-#include <OgreMaterialManager.h>
+#include "OgreTextureManager.h"
+#include "OgreMaterialManager.h"
 
 #include "OgreTrays.h"
 
@@ -51,7 +51,7 @@ AdvancedRenderControls::AdvancedRenderControls(TrayManager* trayMgr, Ogre::Camer
         mDetailsPanel->setParamValue(11, "On");
     }
 
-    mDetailsPanel->setParamValue(12, "Vertex");
+    mDetailsPanel->setParamValue(12, "Pixel");
     mDetailsPanel->setParamValue(13, "Low");
     mDetailsPanel->setParamValue(14, "0");
     mDetailsPanel->setParamValue(15, "0");
@@ -86,18 +86,21 @@ bool AdvancedRenderControls::keyPressed(const KeyboardEvent& evt) {
         Ogre::TextureFilterOptions tfo;
         unsigned int aniso;
 
+        Ogre::FilterOptions mip = Ogre::MaterialManager::getSingleton().getDefaultTextureFiltering(Ogre::FT_MIP);
+
         switch (Ogre::MaterialManager::getSingleton().getDefaultTextureFiltering(Ogre::FT_MAG)) {
-        case Ogre::TFO_BILINEAR:
-            newVal = "Trilinear";
-            tfo = Ogre::TFO_TRILINEAR;
-            aniso = 1;
+        case Ogre::FO_LINEAR:
+            if (mip == Ogre::FO_POINT) {
+                newVal = "Trilinear";
+                tfo = Ogre::TFO_TRILINEAR;
+                aniso = 1;
+            } else {
+                newVal = "Anisotropic";
+                tfo = Ogre::TFO_ANISOTROPIC;
+                aniso = 8;
+            }
             break;
-        case Ogre::TFO_TRILINEAR:
-            newVal = "Anisotropic";
-            tfo = Ogre::TFO_ANISOTROPIC;
-            aniso = 8;
-            break;
-        case Ogre::TFO_ANISOTROPIC:
+        case Ogre::FO_ANISOTROPIC:
             newVal = "None";
             tfo = Ogre::TFO_NONE;
             aniso = 1;
@@ -142,15 +145,12 @@ bool AdvancedRenderControls::keyPressed(const KeyboardEvent& evt) {
     {
         mCamera->getViewport()->getTarget()->writeContentsToTimestampedFile("screenshot", ".png");
     }
-#if OGRE_PROFILING
     // Toggle visibility of profiler window
     else if (key == 'p')
     {
-        Ogre::Profiler* prof = Ogre::Profiler::getSingletonPtr();
-        if (prof)
+        if (auto prof = Ogre::Profiler::getSingletonPtr())
             prof->setEnabled(!prof->getEnabled());
     }
-#endif // OGRE_PROFILING
 #ifdef OGRE_BUILD_COMPONENT_RTSHADERSYSTEM
     // Toggle schemes.
     else if (key == SDLK_F2) {
@@ -167,36 +167,31 @@ bool AdvancedRenderControls::keyPressed(const KeyboardEvent& evt) {
             }
         }
     }
+#   ifdef RTSHADER_SYSTEM_BUILD_EXT_SHADERS
     // Toggles per pixel per light model.
     else if (key == SDLK_F3) {
-        static bool usePerPixelLighting = true;
+        static bool useFFPLighting = true;
 
+        //![rtss_per_pixel]
         // Grab the scheme render state.
         Ogre::RTShader::RenderState* schemRenderState =
             mShaderGenerator->getRenderState(Ogre::RTShader::ShaderGenerator::DEFAULT_SCHEME_NAME);
 
         // Add per pixel lighting sub render state to the global scheme render state.
         // It will override the default FFP lighting sub render state.
-        if (usePerPixelLighting) {
-            Ogre::RTShader::SubRenderState* perPixelLightModel =
-                mShaderGenerator->createSubRenderState(Ogre::RTShader::PerPixelLighting::Type);
+        if (useFFPLighting) {
+            auto perPixelLightModel = mShaderGenerator->createSubRenderState<Ogre::RTShader::FFPLighting>();
 
             schemRenderState->addTemplateSubRenderState(perPixelLightModel);
         }
+        //![rtss_per_pixel]
 
         // Search the per pixel sub render state and remove it.
         else {
-            const Ogre::RTShader::SubRenderStateList& subRenderStateList =
-                schemRenderState->getTemplateSubRenderStateList();
-            Ogre::RTShader::SubRenderStateListConstIterator it = subRenderStateList.begin();
-            Ogre::RTShader::SubRenderStateListConstIterator itEnd = subRenderStateList.end();
-
-            for (; it != itEnd; ++it) {
-                Ogre::RTShader::SubRenderState* curSubRenderState = *it;
-
+            for (auto srs : schemRenderState->getTemplateSubRenderStateList()) {
                 // This is the per pixel sub render state -> remove it.
-                if (curSubRenderState->getType() == Ogre::RTShader::PerPixelLighting::Type) {
-                    schemRenderState->removeTemplateSubRenderState(*it);
+                if (dynamic_cast<Ogre::RTShader::FFPLighting*>(srs)) {
+                    schemRenderState->removeTemplateSubRenderState(srs);
                     break;
                 }
             }
@@ -207,13 +202,13 @@ bool AdvancedRenderControls::keyPressed(const KeyboardEvent& evt) {
         mShaderGenerator->invalidateScheme(Ogre::RTShader::ShaderGenerator::DEFAULT_SCHEME_NAME);
 
         // Update UI.
-        if (usePerPixelLighting)
+        if (!useFFPLighting)
             mDetailsPanel->setParamValue(12, "Pixel");
         else
             mDetailsPanel->setParamValue(12, "Vertex");
-        usePerPixelLighting = !usePerPixelLighting;
+        useFFPLighting = !useFFPLighting;
     }
-
+#   endif
     // Switch vertex shader outputs compaction policy.
     else if (key == SDLK_F4) {
         switch (mShaderGenerator->getVertexShaderOutputsCompactPolicy()) {
@@ -239,10 +234,11 @@ bool AdvancedRenderControls::keyPressed(const KeyboardEvent& evt) {
     }
 #endif // INCLUDE_RTSHADER_SYSTEM
 
-    return true;
+    return InputListener::keyPressed(evt);
 }
 
 void AdvancedRenderControls::frameRendered(const Ogre::FrameEvent& evt) {
+    using namespace Ogre;
     if (!mTrayMgr->isDialogVisible() && mDetailsPanel->isVisible())
     {
         // if details panel is visible, then update its contents
@@ -255,8 +251,8 @@ void AdvancedRenderControls::frameRendered(const Ogre::FrameEvent& evt) {
         mDetailsPanel->setParamValue(7, Ogre::StringConverter::toString(mCamera->getDerivedOrientation().z));
 
 #ifdef OGRE_BUILD_COMPONENT_RTSHADERSYSTEM
-        mDetailsPanel->setParamValue(14, Ogre::StringConverter::toString(mShaderGenerator->getVertexShaderCount()));
-        mDetailsPanel->setParamValue(15, Ogre::StringConverter::toString(mShaderGenerator->getFragmentShaderCount()));
+        mDetailsPanel->setParamValue(14, StringConverter::toString(mShaderGenerator->getShaderCount(GPT_VERTEX_PROGRAM)));
+        mDetailsPanel->setParamValue(15, StringConverter::toString(mShaderGenerator->getShaderCount(GPT_FRAGMENT_PROGRAM)));
 #endif
     }
 }

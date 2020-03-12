@@ -31,13 +31,6 @@ THE SOFTWARE.
 
 #include "OgreStableHeaders.h"
 #include "OgreBillboardChain.h"
-
-#include "OgreHardwareBufferManager.h"
-#include "OgreNode.h"
-#include "OgreCamera.h"
-#include "OgreRoot.h"
-#include "OgreMaterialManager.h"
-#include "OgreLogManager.h"
 #include "OgreViewport.h"
 
 #include <limits>
@@ -81,8 +74,8 @@ namespace Ogre {
         mFaceCamera(true),
         mNormalBase(Vector3::UNIT_X)
     {
-        mVertexData = OGRE_NEW VertexData();
-        mIndexData = OGRE_NEW IndexData();
+        mVertexData.reset(new VertexData());
+        mIndexData.reset(new IndexData());
 
         mOtherTexCoordRange[0] = 0.0f;
         mOtherTexCoordRange[1] = 1.0f;
@@ -95,12 +88,9 @@ namespace Ogre {
         mMaterial = MaterialManager::getSingleton().getDefaultMaterial(false);
         mMaterial->load();
     }
-    //-----------------------------------------------------------------------
-    BillboardChain::~BillboardChain()
-    {
-        OGRE_DELETE mVertexData;
-        OGRE_DELETE mIndexData;
-    }
+
+    BillboardChain::~BillboardChain() = default; // ensure unique_ptr destructors are in cpp
+
     //-----------------------------------------------------------------------
     void BillboardChain::setupChainContainers(void)
     {
@@ -130,13 +120,11 @@ namespace Ogre {
 
             size_t offset = 0;
             // Add a description for the buffer of the positions of the vertices
-            decl->addElement(0, offset, VET_FLOAT3, VES_POSITION);
-            offset += VertexElement::getTypeSize(VET_FLOAT3);
+            offset += decl->addElement(0, offset, VET_FLOAT3, VES_POSITION).getSize();
 
             if (mUseVertexColour)
             {
-                decl->addElement(0, offset, VET_COLOUR, VES_DIFFUSE);
-                offset += VertexElement::getTypeSize(VET_COLOUR);
+                offset += decl->addElement(0, offset, VET_COLOUR, VES_DIFFUSE).getSize();
             }
 
             if (mUseTexCoords)
@@ -146,9 +134,9 @@ namespace Ogre {
 
             if (!mUseTexCoords && !mUseVertexColour)
             {
-                LogManager::getSingleton().logMessage(
-                    "Error - BillboardChain '" + mName + "' is using neither "
-                    "texture coordinates or vertex colours; it will not be "
+                LogManager::getSingleton().logError(
+                    "BillboardChain '" + mName + "' is using neither "
+                    "texture coordinates nor vertex colours; it will not be "
                     "visible on some rendering APIs so you should change this "
                     "so you use one or the other.");
             }
@@ -403,6 +391,12 @@ namespace Ogre {
                 "BillboardChain::getChainElement");
         }
         const ChainSegment& seg = mChainSegmentList[chainIndex];
+        if (seg.head == SEGMENT_EMPTY)
+        {
+            OGRE_EXCEPT(Exception::ERR_ITEM_NOT_FOUND,
+                "Chain segment is empty",
+                "BillboardChain::getChainElement");
+        }
 
         size_t idx = seg.head + elementIndex;
         // adjust for the edge and start
@@ -421,7 +415,11 @@ namespace Ogre {
         }
         const ChainSegment& seg = mChainSegmentList[chainIndex];
         
-        if( seg.tail < seg.head )
+        if (seg.head == SEGMENT_EMPTY)
+        {
+            return 0;
+        }
+        else if (seg.tail < seg.head)
         {
             return seg.tail - seg.head + mMaxElementsPerChain + 1;
         }
@@ -493,7 +491,7 @@ namespace Ogre {
 
         HardwareVertexBufferSharedPtr pBuffer =
             mVertexData->vertexBufferBinding->getBuffer(0);
-        void* pBufferStart = pBuffer->lock(HardwareBuffer::HBL_DISCARD);
+        HardwareBufferLockGuard vertexLock(pBuffer, HardwareBuffer::HBL_DISCARD);
 
         const Vector3& camPos = cam->getDerivedPosition();
         Vector3 eyePos = mParentNode->convertWorldToLocalPosition(camPos);
@@ -520,7 +518,7 @@ namespace Ogre {
 
                     // Determine base pointer to vertex #1
                     void* pBase = static_cast<void*>(
-                        static_cast<char*>(pBufferStart) +
+                        static_cast<char*>(vertexLock.pData) +
                             pBuffer->getVertexSize() * baseIdx);
 
                     // Get index of next item
@@ -631,12 +629,8 @@ namespace Ogre {
 
         } // each segment
 
-
-
-        pBuffer->unlock();
         mVertexCameraUsed = cam;
         mVertexContentDirty = false;
-
     }
     //-----------------------------------------------------------------------
     void BillboardChain::updateIndexBuffer(void)
@@ -645,9 +639,8 @@ namespace Ogre {
         setupBuffers();
         if (mIndexContentDirty)
         {
-
-            uint16* pShort = static_cast<uint16*>(
-                mIndexData->indexBuffer->lock(HardwareBuffer::HBL_DISCARD));
+            HardwareBufferLockGuard indexLock(mIndexData->indexBuffer, HardwareBuffer::HBL_DISCARD);
+            uint16* pShort = static_cast<uint16*>(indexLock.pData);
             mIndexData->indexCount = 0;
             // indexes
             for (ChainSegmentList::iterator segi = mChainSegmentList.begin();
@@ -690,7 +683,6 @@ namespace Ogre {
                 }
 
             }
-            mIndexData->indexBuffer->unlock();
 
             mIndexContentDirty = false;
         }
@@ -699,13 +691,7 @@ namespace Ogre {
     //-----------------------------------------------------------------------
     Real BillboardChain::getSquaredViewDepth(const Camera* cam) const
     {
-        Vector3 min, max, mid, dist;
-        min = mAABB.getMinimum();
-        max = mAABB.getMaximum();
-        mid = ((max - min) * 0.5) + min;
-        dist = cam->getDerivedPosition() - mid;
-
-        return dist.squaredLength();
+        return (cam->getDerivedPosition() - mAABB.getCenter()).squaredLength();
     }
     //-----------------------------------------------------------------------
     Real BillboardChain::getBoundingRadius(void) const
@@ -763,11 +749,11 @@ namespace Ogre {
     //-----------------------------------------------------------------------
     void BillboardChain::getRenderOperation(RenderOperation& op)
     {
-        op.indexData = mIndexData;
+        op.indexData = mIndexData.get();
         op.operationType = RenderOperation::OT_TRIANGLE_LIST;
         op.srcRenderable = this;
         op.useIndexes = true;
-        op.vertexData = mVertexData;
+        op.vertexData = mVertexData.get();
     }
     //-----------------------------------------------------------------------
     bool BillboardChain::preRender(SceneManager* sm, RenderSystem* rsys)
@@ -821,12 +807,12 @@ namespace Ogre {
             NameValuePairList::const_iterator ni = params->find("maxElements");
             if (ni != params->end())
             {
-                maxElements = StringConverter::parseUnsignedLong(ni->second);
+                maxElements = StringConverter::parseSizeT(ni->second);
             }
             ni = params->find("numberOfChains");
             if (ni != params->end())
             {
-                numberOfChains = StringConverter::parseUnsignedLong(ni->second);
+                numberOfChains = StringConverter::parseSizeT(ni->second);
             }
             ni = params->find("useTextureCoords");
             if (ni != params->end())

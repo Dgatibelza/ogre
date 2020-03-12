@@ -25,13 +25,7 @@ THE SOFTWARE.
 -----------------------------------------------------------------------------
 */
 
-#include "OgreShaderGLSLProgramProcessor.h"
-#include "OgreShaderProgramSet.h"
-#include "OgreShaderProgram.h"
-#include "OgreLogManager.h"
-#include "OgreHighLevelGpuProgramManager.h"
-#include "OgreHighLevelGpuProgram.h"
-#include "OgreRoot.h"
+#include "OgreShaderPrecompiledHeaders.h"
 
 namespace Ogre {
 namespace RTShader {
@@ -61,8 +55,8 @@ GLSLProgramProcessor::~GLSLProgramProcessor()
 //-----------------------------------------------------------------------------
 bool GLSLProgramProcessor::preCreateGpuPrograms(ProgramSet* programSet)
 {
-    Program* vsProgram = programSet->getCpuVertexProgram();
-    Program* fsProgram = programSet->getCpuFragmentProgram();
+    Program* vsProgram = programSet->getCpuProgram(GPT_VERTEX_PROGRAM);
+    Program* fsProgram = programSet->getCpuProgram(GPT_FRAGMENT_PROGRAM);
     Function* vsMain   = vsProgram->getEntryPointFunction();
     Function* fsMain   = fsProgram->getEntryPointFunction();    
     bool success;
@@ -78,111 +72,16 @@ bool GLSLProgramProcessor::preCreateGpuPrograms(ProgramSet* programSet)
 //-----------------------------------------------------------------------------
 bool GLSLProgramProcessor::postCreateGpuPrograms(ProgramSet* programSet)
 {
-    Program* vsCpuProgram = programSet->getCpuVertexProgram();
-    Program* fsCpuProgram = programSet->getCpuFragmentProgram();
-    GpuProgramPtr vsGpuProgram = programSet->getGpuVertexProgram();
-    GpuProgramPtr fsGpuProgram = programSet->getGpuFragmentProgram();
-    
-    // Bind sub shaders for the vertex shader.
-    bindSubShaders(vsCpuProgram, vsGpuProgram);
-    
-    // Bind sub shaders for the fragment shader.
-    bindSubShaders(fsCpuProgram, fsGpuProgram);
-
-    // Bind vertex shader auto parameters.
-    bindAutoParameters(programSet->getCpuVertexProgram(), programSet->getGpuVertexProgram());
-
-    // Bind fragment shader auto parameters.
-    bindAutoParameters(programSet->getCpuFragmentProgram(), programSet->getGpuFragmentProgram());
-
-    // Bind texture samplers for the vertex shader.
-    bindTextureSamplers(vsCpuProgram, vsGpuProgram);
-
-    // Bind texture samplers for the fragment shader.
-    bindTextureSamplers(fsCpuProgram, fsGpuProgram);
-
+    // Bind vertex auto parameters.
+    for(auto type : {GPT_VERTEX_PROGRAM, GPT_FRAGMENT_PROGRAM})
+    {
+        Program* cpuProgram = programSet->getCpuProgram(type);
+        GpuProgramPtr gpuProgram = programSet->getGpuProgram(type);
+        bindAutoParameters(cpuProgram, gpuProgram);
+        bindTextureSamplers(cpuProgram, gpuProgram);
+    }
 
     return true;
-}
-
-//-----------------------------------------------------------------------------
-void GLSLProgramProcessor::bindSubShaders(Program* program, GpuProgramPtr pGpuProgram)
-{
-    if (program->getDependencyCount() > 0)
-    {
-        // Get all attached shaders so we do not attach shaders twice.
-        // maybe GLSLProgram should take care of that ( prevent add duplicate shaders )
-        String attachedShaders = pGpuProgram->getParameter("attach");
-        String subShaderDef = "";
-
-        for (unsigned int i=0; i < program->getDependencyCount(); ++i)
-        {
-            // Here we append _VS and _FS to the library shaders (so max each lib shader
-            // is compiled twice once as vertex and once as fragment shader)
-            String subShaderName = program->getDependency(i);
-            if (program->getType() == GPT_VERTEX_PROGRAM)
-            {
-                subShaderName += "_VS";
-            }
-            else
-            {
-                subShaderName += "_FS";
-            }                   
-
-            // Check if the library shader already compiled
-            if (!HighLevelGpuProgramManager::getSingleton().resourceExists(
-                    subShaderName, ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME))
-            {
-                // Create the library shader
-                HighLevelGpuProgramPtr pSubGpuProgram = HighLevelGpuProgramManager::getSingleton().createProgram(subShaderName,
-                    ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME, TargetLanguage, program->getType());
-
-                // Set the source name
-                String sourceName = program->getDependency(i) + ".glsl";
-                pSubGpuProgram->setSourceFile(sourceName);
-                pSubGpuProgram->load();
-
-                // Prepend the current GLSL version
-                int GLSLVersion = Root::getSingleton().getRenderSystem()->getNativeShadingLanguageVersion();
-                String versionLine = "#version " + StringConverter::toString(GLSLVersion) + "\n";
-
-                if(GLSLVersion > 130) {
-                    // Redefine texture functions to maintain reusability
-                    versionLine += "#define texture1D texture\n";
-                    versionLine += "#define texture2D texture\n";
-                    versionLine += "#define texture3D texture\n";
-                    versionLine += "#define textureCube texture\n";
-                    versionLine += "#define texture2DLod textureLod\n";
-                }
-
-                pSubGpuProgram->setSource(versionLine + pSubGpuProgram->getSource());
-
-                // If we have compile errors than stop processing
-                if (pSubGpuProgram->hasCompileError())
-                {
-                    OGRE_EXCEPT(Exception::ERR_INTERNAL_ERROR, 
-                        "Could not compile shader library from the source file: " + sourceName, 
-                        "GLSLProgramProcessor::bindSubShaders" );   
-                }
-
-                mLibraryPrograms.push_back(subShaderName);
-            }
-
-            // Check if the lib shader already attached to this shader
-            if (attachedShaders.find(subShaderName) == String::npos)
-            {
-                // Append the shader name to subShaders
-                subShaderDef += subShaderName + " ";
-            }
-        }
-
-        // Check if we have something to attach
-        if (subShaderDef.length() > 0)
-        {
-            pGpuProgram->setParameter("attach", subShaderDef);
-        }
-    }
-    
 }
 //-----------------------------------------------------------------------------
 void GLSLProgramProcessor::bindTextureSamplers(Program* pCpuProgram, GpuProgramPtr pGpuProgram)

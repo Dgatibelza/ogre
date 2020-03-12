@@ -77,14 +77,14 @@ class VisualTest : public OgreBites::Sample
     /** Unload all resources used by this sample */
     virtual void unloadResources()
     {
+#ifdef OGRE_BUILD_COMPONENT_RTSHADERSYSTEM
+        auto& rtShaderGen = Ogre::RTShader::ShaderGenerator::getSingleton();
+        auto schemRenderState = rtShaderGen.getRenderState(Ogre::RTShader::ShaderGenerator::DEFAULT_SCHEME_NAME);
+        schemRenderState->reset();
+#endif
         Ogre::ResourceGroupManager::getSingleton().clearResourceGroup(TRANSIENT_RESOURCE_GROUP);
         Sample::unloadResources();
-    }
-
-    /** Changes aspect ratio to match any window resizings */
-    virtual void windowResized(Ogre::RenderWindow* rw)
-    {
-        mCamera->setAspectRatio((Ogre::Real)mViewport->getActualWidth() / (Ogre::Real)mViewport->getActualHeight());
+        mAnimStateList.clear();
     }
 
     /** Returns whether or not a screenshot should be taken at the given frame */

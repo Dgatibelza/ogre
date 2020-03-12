@@ -51,7 +51,7 @@ namespace Ogre {
     class _OgreExport Technique : public TechniqueAlloc
     {
     public:
-        typedef vector<Pass*>::type Passes;
+        typedef std::vector<Pass*> Passes;
 
     protected:
         /// Illumination pass state type
@@ -68,7 +68,6 @@ namespace Ogre {
         IlluminationPassList mIlluminationPasses;
         // Raw pointer since we don't want child to stop parent's destruction
         Material* mParent;
-        bool mIsSupported;
         IlluminationPassesState mIlluminationPassesCompilationPhase;
         /// LOD level
         unsigned short mLodIndex;
@@ -78,7 +77,6 @@ namespace Ogre {
         unsigned short mSchemeIndex;
         /// Optional name for the technique
         String mName;
-
         /// Internal method for clearing illumination pass list
         void clearIlluminationPasses(void);
         /// Internal method - check for manually assigned illumination passes
@@ -109,6 +107,7 @@ namespace Ogre {
         // User objects binding.
         UserObjectBindings  mUserObjectBindings;
 
+        bool mIsSupported;
     public:
         /** Directive used to manually control technique support based on the
             inclusion or exclusion of some factor.
@@ -141,8 +140,8 @@ namespace Ogre {
             GPUDeviceNameRule(const String& pattern, IncludeOrExclude ie, bool caseSen)
                 : devicePattern(pattern), includeOrExclude(ie), caseSensitive(caseSen) {}
         };
-        typedef vector<GPUVendorRule>::type GPUVendorRuleList;
-        typedef vector<GPUDeviceNameRule>::type GPUDeviceNameRuleList;
+        typedef std::vector<GPUVendorRule> GPUVendorRuleList;
+        typedef std::vector<GPUDeviceNameRule> GPUDeviceNameRuleList;
     protected:
         GPUVendorRuleList mGPUVendorRules;
         GPUDeviceNameRuleList mGPUDeviceNameRules;
@@ -183,11 +182,11 @@ namespace Ogre {
         Pass* createPass(void);
         /** Retrieves the Pass with the given index.
          * @deprecated use getPasses() */
-        Pass* getPass(unsigned short index);
+        Pass* getPass(unsigned short index) const;
         /** Retrieves the Pass matching name.
             Returns 0 if name match is not found.
         */
-        Pass* getPass(const String& name);
+        Pass* getPass(const String& name) const;
         /** Retrieves the number of passes.
          * @deprecated use getPasses() */
         unsigned short getNumPasses(void) const;
@@ -273,7 +272,23 @@ namespace Ogre {
         /** return this material specific  shadow casting specific material
         */
         Ogre::MaterialPtr getShadowCasterMaterial() const;
-        /** set this material specific  shadow casting specific material
+        /** Sets the details of the material to use when rendering as a
+            shadow caster.
+            @remarks
+            Texture-based shadows require that the caster is rendered to a texture
+            in a solid colour (the shadow colour in the case of modulative texture
+            shadows). Whilst Ogre can arrange this for the fixed function
+            pipeline, passes which use vertex programs might need the vertex
+            programs still to run in order to preserve any deformation etc
+            that it does. However, lighting calculations must be a lot simpler,
+            with only the ambient colour being used (which the engine will ensure
+            is bound to the shadow colour).
+            @par
+            Therefore, it is up to implementors of vertex programs to provide an
+            alternative material which can be used to render the object
+            to a shadow texture. Do all the same vertex transforms, but set the
+            colour of the vertex to the ambient colour, as bound using the
+            standard auto parameter binding mechanism.
         */
         void setShadowCasterMaterial(Ogre::MaterialPtr val);
         /** set this material specific  shadow casting specific material
@@ -312,7 +327,7 @@ namespace Ogre {
             property there.
         @see Pass::setAmbient
         */
-        void setAmbient(Real red, Real green, Real blue);
+        void setAmbient(float red, float green, float blue);
 
         /// @overload
         void setAmbient(const ColourValue& ambient);
@@ -325,7 +340,7 @@ namespace Ogre {
             property there.
         @see Pass::setDiffuse
         */
-        void setDiffuse(Real red, Real green, Real blue, Real alpha);
+        void setDiffuse(float red, float green, float blue, float alpha);
 
         /// @overload
         void setDiffuse(const ColourValue& diffuse);
@@ -338,7 +353,7 @@ namespace Ogre {
             property there.
         @see Pass::setSpecular
         */
-        void setSpecular(Real red, Real green, Real blue, Real alpha);
+        void setSpecular(float red, float green, float blue, float alpha);
 
         /// @overload
         void setSpecular(const ColourValue& specular);
@@ -361,7 +376,7 @@ namespace Ogre {
             property there.
         @see Pass::setSelfIllumination
         */
-        void setSelfIllumination(Real red, Real green, Real blue);
+        void setSelfIllumination(float red, float green, float blue);
 
         /// @overload
         void setSelfIllumination(const ColourValue& selfIllum);
@@ -405,6 +420,11 @@ namespace Ogre {
         @see Pass::setColourWriteEnabled
         */
         void setColourWriteEnabled(bool enabled);
+
+        /** Sets which colour buffer channels are enabled for writing for each Pass.
+         @see Pass::setColourWriteEnabled
+         */
+        void setColourWriteEnabled(bool red, bool green, bool blue, bool alpha);
 
         /** Sets the culling mode for each pass  based on the 'vertex winding'.
         @note
@@ -458,7 +478,7 @@ namespace Ogre {
             bool overrideScene,
             FogMode mode = FOG_NONE,
             const ColourValue& colour = ColourValue::White,
-            Real expDensity = 0.001, Real linearStart = 0.0, Real linearEnd = 1.0 );
+            Real expDensity = 0.001f, Real linearStart = 0.0f, Real linearEnd = 1.0f );
 
         /** Sets the depth bias to be used for each Pass.
         @note
@@ -593,17 +613,7 @@ namespace Ogre {
         /// Gets the name of the technique
         const String& getName(void) const { return mName; }
 
-        /** Applies texture names to Texture Unit State with matching texture name aliases.
-            All passes, and Texture Unit States within the technique are checked.
-            If matching texture aliases are found then true is returned.
-
-        @param
-            aliasList is a map container of texture alias, texture name pairs
-        @param
-            apply set true to apply the texture aliases else just test to see if texture alias matches are found.
-        @return
-            True if matching texture aliases were found in the Technique.
-        */
+        /// @deprecated do not use
         bool applyTextureAliases(const AliasTextureNamePairList& aliasList, const bool apply = true) const;
 
 

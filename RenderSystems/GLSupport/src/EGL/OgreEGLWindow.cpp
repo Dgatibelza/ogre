@@ -29,7 +29,6 @@ THE SOFTWARE.
 #include "OgreRoot.h"
 #include "OgreException.h"
 #include "OgreStringConverter.h"
-#include "OgreWindowEventUtilities.h"
 
 #include "OgreGLRenderSystemCommon.h"
 
@@ -37,30 +36,18 @@ THE SOFTWARE.
 #include "OgreEGLWindow.h"
 #include "OgreEGLContext.h"
 
-#include <iostream>
-#include <algorithm>
-#include <climits>
+#include <EGL/eglext.h>
 
 namespace Ogre {
     EGLWindow::EGLWindow(EGLSupport *glsupport)
-        : mGLSupport(glsupport),
-          mContext(0),
+        : GLWindow(), mGLSupport(glsupport),
           mWindow(0),
           mNativeDisplay(0),
           mEglDisplay(EGL_NO_DISPLAY),
           mEglConfig(0),
           mEglSurface(0)
     {
-        mIsTopLevel = false;
-        mIsFullScreen = false;
-        mIsExternal = false;
-        mIsExternalGLControl = false;
-        mClosed = false;
         mActive = true;//todo
-        mIsExternalGLControl = false;
-        mVisible = false;
-        mVSync = false;
-        mVSyncInterval = 1;
     }
 
     EGLWindow::~EGLWindow()
@@ -84,11 +71,6 @@ namespace Ogre {
 
         mClosed = true;
         mActive = false;
-
-        if (!mIsExternal)
-        {
-            WindowEventUtilities::_removeRenderWindow(this);
-        }
 
         if (mIsFullScreen)
         {
@@ -131,23 +113,6 @@ namespace Ogre {
         }
     }
 
-    bool EGLWindow::isClosed() const
-    {
-        return mClosed;
-    }
-
-    bool EGLWindow::isVisible() const
-    {
-        return mVisible;
-    }
-
-    void EGLWindow::setVisible(bool visible)
-    {
-        mVisible = visible;
-    }
-
-  
-
     void EGLWindow::swapBuffers()
     {
         if (mClosed || mIsExternalGLControl)
@@ -158,9 +123,7 @@ namespace Ogre {
         if (eglSwapBuffers(mEglDisplay, mEglSurface) == EGL_FALSE)
         {
             EGL_CHECK_ERROR
-            OGRE_EXCEPT(Exception::ERR_RENDERINGAPI_ERROR,
-                        "Fail to SwapBuffers",
-                        __FUNCTION__);
+            OGRE_EXCEPT(Exception::ERR_RENDERINGAPI_ERROR, "Fail to SwapBuffers");
         }
     }
 
@@ -178,7 +141,7 @@ namespace Ogre {
         }
         else if (name == "GLCONTEXT")
         {
-            *static_cast<EGLContext**>(pData) = mContext;
+            *static_cast<GLContext**>(pData) = mContext;
             return;
         } 
         else if (name == "WINDOW")
@@ -188,44 +151,32 @@ namespace Ogre {
         } 
     }
 
-    void EGLWindow::copyContentsToMemory(const Box& src, const PixelBox &dst, FrameBuffer buffer)
+    PixelFormat EGLWindow::suggestPixelFormat() const
     {
-        if(src.right > mWidth || src.bottom > mHeight || src.front != 0 || src.back != 1
-        || dst.getWidth() != src.getWidth() || dst.getHeight() != src.getHeight() || dst.getDepth() != 1)
-        {
-            OGRE_EXCEPT(Exception::ERR_INVALIDPARAMS, "Invalid box.", "EGLWindow::copyContentsToMemory");
-        }
-
-        if (buffer == FB_AUTO)
-        {
-            buffer = mIsFullScreen? FB_FRONT : FB_BACK;
-        }
-
-        static_cast<GLRenderSystemCommon*>(Root::getSingleton().getRenderSystem())
-                ->_copyContentsToMemory(getViewport(0), src, dst, buffer);
+        return mGLSupport->getContextProfile() == GLNativeSupport::CONTEXT_ES ? PF_BYTE_RGBA : PF_BYTE_RGB;
     }
-
 
     ::EGLSurface EGLWindow::createSurfaceFromWindow(::EGLDisplay display,
                                                     NativeWindowType win)
     {
         ::EGLSurface surface;
 
-        surface = eglCreateWindowSurface(display, mEglConfig, (EGLNativeWindowType)win, NULL);
+#if OGRE_PLATFORM == OGRE_PLATFORM_EMSCRIPTEN
+        int* gamma_attribs = NULL;
+#else
+        int gamma_attribs[] = {EGL_GL_COLORSPACE_KHR, EGL_GL_COLORSPACE_SRGB_KHR, EGL_NONE};
+#endif
+        mHwGamma = mHwGamma && mGLSupport->checkExtension("EGL_KHR_gl_colorspace");
+
+        surface = eglCreateWindowSurface(display, mEglConfig, (EGLNativeWindowType)win, mHwGamma ? gamma_attribs : NULL);
         EGL_CHECK_ERROR
 
         if (surface == EGL_NO_SURFACE)
         {
             OGRE_EXCEPT(Exception::ERR_RENDERINGAPI_ERROR,
-                        "Fail to create EGLSurface based on NativeWindowType",
-                        __FUNCTION__);
+                        "Fail to create EGLSurface based on NativeWindowType");
         }
         return surface;
-    }
-
-    bool EGLWindow::requiresTextureFlipping() const
-    {
-        return false;
     }
 
     void EGLWindow::setVSyncEnabled(bool vsync) {
@@ -253,11 +204,4 @@ namespace Ogre {
         eglMakeCurrent (dpy, oldDraw, oldRead, oldContext);
         EGL_CHECK_ERROR
     }
-
-    void EGLWindow::setVSyncInterval(unsigned int interval) {
-        mVSyncInterval = interval;
-        if (mVSync)
-            setVSyncEnabled(true);
-    }
-
 }

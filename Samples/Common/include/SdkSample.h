@@ -107,11 +107,6 @@ namespace OgreBites
             return true;
         }
 
-        virtual void windowResized(Ogre::RenderWindow* rw)
-        {
-            mCamera->setAspectRatio((Ogre::Real)mViewport->getActualWidth() / (Ogre::Real)mViewport->getActualHeight());
-        }
-
         virtual bool keyPressed(const KeyboardEvent& evt)
         {
         	int key = evt.keysym.sym;
@@ -278,6 +273,43 @@ namespace OgreBites
                 mTrayMgr->hideCursor();
                 mDragLook = false;
             }
+        }
+
+        void addTextureDebugOverlay(TrayLocation loc, const Ogre::TexturePtr& tex, size_t i)
+        {
+            using namespace Ogre;
+            // Create material
+            String matName = "Ogre/DebugTexture" + StringConverter::toString(i);
+            MaterialPtr debugMat = MaterialManager::getSingleton().getByName(
+                matName, ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME);
+            if (!debugMat)
+            {
+                debugMat = MaterialManager::getSingleton().create(matName,
+                                                                  ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME);
+            }
+            Pass* p = debugMat->getTechnique(0)->getPass(0);
+            p->removeAllTextureUnitStates();
+            p->setLightingEnabled(false);
+            TextureUnitState *t = p->createTextureUnitState(tex->getName());
+            t->setTextureAddressingMode(TextureUnitState::TAM_CLAMP);
+
+            // create template
+            if (!OverlayManager::getSingleton().hasOverlayElement("Ogre/DebugTexOverlay", true))
+            {
+                OverlayElement* e = OverlayManager::getSingleton().createOverlayElement("Panel", "Ogre/DebugTexOverlay", true);
+                e->setMetricsMode(GMM_PIXELS);
+                e->setWidth(128);
+                e->setHeight(128);
+            }
+
+            // add widget
+            String widgetName = "DebugTex"+ StringConverter::toString(i);
+            Widget* w = mTrayMgr->getWidget(widgetName);
+            if (!w)
+            {
+                w = mTrayMgr->createDecorWidget(loc, widgetName, "Ogre/DebugTexOverlay");
+            }
+            w->getOverlayElement()->setMaterial(debugMat);
         }
 
         Ogre::Viewport* mViewport;          // main viewport

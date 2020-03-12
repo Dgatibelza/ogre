@@ -73,9 +73,12 @@ public:
 
     static String TargetLanguage;
 
+    static const char* getGL3CompatDefines();
 
     // Protected methods.
 protected:
+
+    void writeMainSourceCode(std::ostream& os, Program* program);
 
     /** Initialize string maps. */
     void initializeStringMaps();
@@ -83,8 +86,8 @@ protected:
     /** Write a local parameter. */
     void writeLocalParameter(std::ostream& os, ParameterPtr parameter);
 
-    /** Write forward declarations. This is needed so that we can attach library shader at a later step. */
-    void writeForwardDeclarations(std::ostream& os, Program* program);
+    /** Write the program dependencies. */
+    void writeProgramDependencies(std::ostream& os, Program* program);
 
     /** Write the input params of the function */
     void writeInputParameters(std::ostream& os, Function* function, GpuProgramType gpuType);
@@ -93,10 +96,10 @@ protected:
     void writeOutParameters(std::ostream& os, Function* function, GpuProgramType gpuType);
 
 protected:
-    typedef map<GpuConstantType, const char*>::type     GpuConstTypeToStringMap;
-    typedef map<Parameter::Semantic, const char*>::type ParamSemanticToStringMap;
-    typedef map<Parameter::Content, const char*>::type  ParamContentToStringMap;
-    typedef map<String, String>::type                   StringMap;
+    typedef std::map<GpuConstantType, const char*>     GpuConstTypeToStringMap;
+    typedef std::map<Parameter::Semantic, const char*> ParamSemanticToStringMap;
+    typedef std::map<Parameter::Content, const char*>  ParamContentToStringMap;
+    typedef std::map<String, String>                   StringMap;
 
     // Attributes.
 protected:
@@ -105,14 +108,14 @@ protected:
     // Map between parameter semantic to string value.
     ParamSemanticToStringMap mParamSemanticMap;
 
-    // Map parameter name to a new parameter name (sometime renaming is required to match names between vertex and fragment shader)
-    StringMap mInputToGLStatesMap;
+    std::set<String> mLocalRenames;
+
     // Map parameter content to vertex attributes 
     ParamContentToStringMap mContentToPerVertexAttributes;
     // Holds the current glsl version
     int mGLSLVersion;
-    // Holds the fragment input params 
-    StringVector mFragInputParams;
+    // set by derived class
+    bool mIsGLSLES;
 };
 
 /** GLSL program writer factory implementation.

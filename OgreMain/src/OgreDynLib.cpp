@@ -29,8 +29,6 @@ THE SOFTWARE.
 
 #include "OgreDynLib.h"
 
-#include "OgreException.h"
-#include "OgreLogManager.h"
 
 #if OGRE_PLATFORM == OGRE_PLATFORM_WIN32 || OGRE_PLATFORM == OGRE_PLATFORM_WINRT
 #  define WIN32_LEAN_AND_MEAN
@@ -41,13 +39,20 @@ THE SOFTWARE.
 #endif
 
 #if OGRE_PLATFORM == OGRE_PLATFORM_WINRT
-#include "OgreUTFString.h"
+static std::wstring stringToWstring(const std::string& s)
+{
+	int len = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), s.length(), NULL, 0);
+	std::wstring ws(L"", len);
+	wchar_t* pWSBuf = const_cast<wchar_t*>(ws.c_str());
+	MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, pWSBuf, len);
+	return ws;
+}
 #endif
 
 #if OGRE_PLATFORM == OGRE_PLATFORM_APPLE || OGRE_PLATFORM == OGRE_PLATFORM_APPLE_IOS
 #   include "macUtils.h"
 #endif
-#if OGRE_PLATFORM == OGRE_PLATFORM_APPLE || OGRE_PLATFORM == OGRE_PLATFORM_APPLE_IOS || OGRE_PLATFORM == OGRE_PLATFORM_NACL 
+#if OGRE_PLATFORM == OGRE_PLATFORM_APPLE || OGRE_PLATFORM == OGRE_PLATFORM_APPLE_IOS
 #   include <dlfcn.h>
 #endif
 
@@ -69,38 +74,39 @@ namespace Ogre {
     //-----------------------------------------------------------------------
     void DynLib::load()
     {
-        // Log library load
-        LogManager::getSingleton().logMessage("Loading library " + mName);
-
         String name = mName;
 #if OGRE_PLATFORM == OGRE_PLATFORM_EMSCRIPTEN
         if (name.find(".js") == String::npos)
             name += ".js";
-#elif OGRE_PLATFORM == OGRE_PLATFORM_LINUX || OGRE_PLATFORM == OGRE_PLATFORM_NACL
+#elif OGRE_PLATFORM == OGRE_PLATFORM_LINUX
         // dlopen() does not add .so to the filename, like windows does for .dll
         if (name.find(".so") == String::npos)
         {
-            name += ".so.";
-            name += StringConverter::toString(OGRE_VERSION_MAJOR) + ".";
-            name += StringConverter::toString(OGRE_VERSION_MINOR) + ".";
-            name += StringConverter::toString(OGRE_VERSION_PATCH);
+            name += StringUtil::format(".so.%d.%d.%d", OGRE_VERSION_MAJOR, OGRE_VERSION_MINOR, OGRE_VERSION_PATCH);
         }
 #elif OGRE_PLATFORM == OGRE_PLATFORM_APPLE
         // dlopen() does not add .dylib to the filename, like windows does for .dll
         if(name.substr(name.find_last_of(".") + 1) != "dylib")
             name += ".dylib";
 #elif OGRE_PLATFORM == OGRE_PLATFORM_WIN32 || OGRE_PLATFORM == OGRE_PLATFORM_WINRT
+
         // Although LoadLibraryEx will add .dll itself when you only specify the library name,
         // if you include a relative path then it does not. So, add it to be sure.
         if(name.substr(name.find_last_of(".") + 1) != "dll")
-            name += ".dll";
+            name += OGRE_BUILD_SUFFIX ".dll";
 #endif
+        // Log library load
+        LogManager::getSingleton().logMessage("Loading library " + name);
+
         mInst = (DYNLIB_HANDLE)DYNLIB_LOAD( name.c_str() );
 #if OGRE_PLATFORM == OGRE_PLATFORM_APPLE
         if(!mInst)
         {
+            name = mName;
+            if(name.substr(name.find_last_of(".") + 1) != "framework")
+                name += ".framework";
             // Try again as a framework
-            mInst = (DYNLIB_HANDLE)FRAMEWORK_LOAD( mName );
+            mInst = (DYNLIB_HANDLE)FRAMEWORK_LOAD( name );
         }
 #endif
         if( !mInst )
@@ -168,9 +174,7 @@ namespace Ogre {
         {
             wideMsgBuf[0] = 0;
         }
-#if OGRE_WCHAR_T_STRINGS
-        String ret = wideMsgBuf;
-#else
+
         char narrowMsgBuf[2048] = "";
         if(0 == WideCharToMultiByte(
             CP_ACP, 0,
@@ -181,7 +185,7 @@ namespace Ogre {
             narrowMsgBuf[0] = 0;
         }
         String ret = narrowMsgBuf;
-#endif
+
         return ret;
 #elif OGRE_PLATFORM == OGRE_PLATFORM_LINUX || OGRE_PLATFORM == OGRE_PLATFORM_APPLE
         return String(dlerror());

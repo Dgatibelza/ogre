@@ -27,11 +27,7 @@ THE SOFTWARE.
 */
 #include "OgreStableHeaders.h"
 #include "OgreVertexIndexData.h"
-#include "OgreHardwareBufferManager.h"
 #include "OgreHardwareVertexBuffer.h"
-#include "OgreRoot.h"
-#include "OgreRenderSystem.h" 
-#include "OgreException.h"
 
 namespace Ogre {
 
@@ -149,11 +145,7 @@ namespace Ogre {
 
         // Upfront, lets check whether we have vertex program capability
         RenderSystem* rend = Root::getSingleton().getRenderSystem();
-        bool useVertexPrograms = false;
-        if (rend && rend->getCapabilities()->hasCapability(RSC_VERTEX_PROGRAM))
-        {
-            useVertexPrograms = true;
-        }
+        bool useVertexPrograms = rend;
 
 
         // Look for a position element
@@ -336,10 +328,10 @@ namespace Ogre {
 
         // Build up a list of both old and new elements in each buffer
         unsigned short buf = 0;
-        vector<void*>::type oldBufferLocks;
-        vector<size_t>::type oldBufferVertexSizes;
-        vector<void*>::type newBufferLocks;
-        vector<size_t>::type newBufferVertexSizes;
+        std::vector<void*> oldBufferLocks;
+        std::vector<size_t> oldBufferVertexSizes;
+        std::vector<void*> newBufferLocks;
+        std::vector<size_t> newBufferVertexSizes;
         VertexBufferBinding* newBinding = pManager->createVertexBufferBinding();
         const VertexBufferBinding::VertexBufferBindingMap& oldBindingMap = vertexBufferBinding->getBindings();
         VertexBufferBinding::VertexBufferBindingMap::const_iterator itBinding;
@@ -351,6 +343,9 @@ namespace Ogre {
             oldBufferLocks.resize(count);
             oldBufferVertexSizes.resize(count);
         }
+
+        bool useShadowBuffer = false;
+
         // Lock all the old buffers for reading
         for (itBinding = oldBindingMap.begin(); itBinding != oldBindingMap.end(); ++itBinding)
         {
@@ -361,6 +356,8 @@ namespace Ogre {
             oldBufferLocks[itBinding->first] =
                 itBinding->second->lock(
                     HardwareBuffer::HBL_READ_ONLY);
+
+            useShadowBuffer |= itBinding->second->hasShadowBuffer();
         }
         
         // Create new buffers and lock all for writing
@@ -373,7 +370,7 @@ namespace Ogre {
                 pManager->createVertexBuffer(
                     vertexSize,
                     vertexCount, 
-                    bufferUsages[buf]);
+                    bufferUsages[buf], useShadowBuffer);
             newBinding->setBinding(buf, vbuf);
 
             newBufferVertexSizes.push_back(vertexSize);
@@ -383,7 +380,7 @@ namespace Ogre {
         }
 
         // Map from new to old elements
-        typedef map<const VertexElement*, const VertexElement*>::type NewToOldElementMap;
+        typedef std::map<const VertexElement*, const VertexElement*> NewToOldElementMap;
         NewToOldElementMap newToOldElementMap;
         const VertexDeclaration::VertexElementList& newElemList = newDeclaration->getElements();
         VertexDeclaration::VertexElementList::const_iterator ei, eiend;
@@ -554,7 +551,7 @@ namespace Ogre {
     //-----------------------------------------------------------------------
     void VertexData::removeUnusedBuffers(void)
     {
-        set<ushort>::type usedBuffers;
+        std::set<ushort> usedBuffers;
 
         // Collect used buffers
         const VertexDeclaration::VertexElementList& allelems = 
@@ -758,6 +755,13 @@ namespace Ogre {
         inline Triangle( const Triangle& t )
             : a( t.a ), b( t.b ), c( t.c )
         {
+        }
+
+        inline Triangle& operator=(const Triangle& rhs) {
+            a = rhs.a;
+            b = rhs.b;
+            c = rhs.c;
+            return *this;
         }
 
         inline bool sharesEdge(const Triangle& t) const

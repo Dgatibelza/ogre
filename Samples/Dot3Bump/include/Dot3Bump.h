@@ -36,12 +36,6 @@ public:
 
     void testCapabilities(const RenderSystemCapabilities* caps)
     {
-        if (!caps->hasCapability(RSC_VERTEX_PROGRAM) || !(caps->hasCapability(RSC_FRAGMENT_PROGRAM)))
-        {
-            OGRE_EXCEPT(Exception::ERR_NOT_IMPLEMENTED, "Your graphics card does not support vertex and fragment programs, "
-                "so you cannot run this sample. Sorry!", "Dot3BumpSample::testCapabilities");
-        }
-
         if (!GpuProgramManager::getSingleton().isSyntaxSupported("arbfp1") &&
             !GpuProgramManager::getSingleton().isSyntaxSupported("ps_2_0") &&
             !GpuProgramManager::getSingleton().isSyntaxSupported("ps_4_0") &&
@@ -94,14 +88,9 @@ public:
         {
             // get the light pivot that corresponds to this checkbox
             SceneNode* pivot = box->getName() == "Light1" ? mLightPivot1 : mLightPivot2;
-            SceneNode::ObjectIterator it = pivot->getAttachedObjectIterator();
 
-            while (it.hasMoreElements())  // toggle visibility of light and billboard set
-            {
-                MovableObject* o = it.getNext();
-                o->setVisible(box->isChecked());
-            }
-
+            // toggle visibility of light and billboard set
+            pivot->setVisible(box->isChecked());
         }
         else if (box->getName() == "MoveLights")
         {
@@ -120,11 +109,8 @@ protected:
         setupLights();
         setupControls();
 
-        mCameraNode->setPosition(0, 0, 500);
-
-#if OGRE_PLATFORM != OGRE_PLATFORM_APPLE_IOS
-        setDragLook(true);
-#endif
+        mCameraMan->setStyle(CS_ORBIT);
+        mCameraMan->setYawPitchDist(Radian(0), Radian(0), 500);
     }
 
 
@@ -148,9 +134,9 @@ protected:
             // Find the location of the core shader libs
             for (; it != itEnd; ++it)
             {
-                if ((*it)->archive->getName().find("RTShaderLib") != Ogre::String::npos)
+                if (it->archive->getName().find("RTShaderLib") != Ogre::String::npos)
                 {
-                    shaderCoreLibsPath = (*it)->archive->getName() + "/";   
+                    shaderCoreLibsPath = it->archive->getName() + "/";
                     coreLibsFound = true;
                     break;
                 }
@@ -175,12 +161,12 @@ protected:
 
         matNames.push_back("Examples/BumpMapping/MultiLight");
         matNames.push_back("Examples/BumpMapping/MultiLightSpecular");
-        matNames.push_back("Examples/OffsetMapping/Specular");
         matNames.push_back("Examples/ShowUV");
         matNames.push_back("Examples/ShowNormals");
         matNames.push_back("Examples/ShowTangents");
 
 #ifdef INCLUDE_RTSHADER_SYSTEM
+        matNames.push_back("RTSS/OffsetMapping");
         matNames.push_back("RTSS/NormalMapping_SinglePass");
         matNames.push_back("RTSS/NormalMapping_MultiPass");
 #endif

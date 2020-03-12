@@ -25,7 +25,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 -----------------------------------------------------------------------------
 */
-#include "OgreTerrainMaterialGeneratorA.h"
+#include "OgreTerrainMaterialShaderHelpers.h"
 #include "OgreTerrain.h"
 #include "OgreHighLevelGpuProgramManager.h"
 #include "OgreRoot.h"
@@ -35,19 +35,25 @@ THE SOFTWARE.
 namespace Ogre
 {
     //---------------------------------------------------------------------
+    ShaderHelperGLSL::ShaderHelperGLSL() : ShaderHelper(true)
+    {
+        mIsGLES = HighLevelGpuProgramManager::getSingleton().isLanguageSupported("glsles");
+    }
     //---------------------------------------------------------------------
     HighLevelGpuProgramPtr
-    TerrainMaterialGeneratorA::SM2Profile::ShaderHelperGLSL::createVertexProgram(
+    ShaderHelperGLSL::createVertexProgram(
         const SM2Profile* prof, const Terrain* terrain, TechniqueType tt)
     {
         HighLevelGpuProgramManager& mgr = HighLevelGpuProgramManager::getSingleton();
         String progName = getVertexProgramName(prof, terrain, tt);
 
+        String lang = mgr.isLanguageSupported("glsles") ? "glsles" : "glsl";
+
         HighLevelGpuProgramPtr ret = mgr.getByName(progName, ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME);
         if (!ret)
         {
-            ret = mgr.createProgram(progName, ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME, 
-                "glsl", GPT_VERTEX_PROGRAM);
+            ret = mgr.createProgram(progName, ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME,
+                                    lang, GPT_VERTEX_PROGRAM);
         }
         else
         {
@@ -58,17 +64,19 @@ namespace Ogre
     }
     //---------------------------------------------------------------------
     HighLevelGpuProgramPtr
-        TerrainMaterialGeneratorA::SM2Profile::ShaderHelperGLSL::createFragmentProgram(
+        ShaderHelperGLSL::createFragmentProgram(
             const SM2Profile* prof, const Terrain* terrain, TechniqueType tt)
     {
         HighLevelGpuProgramManager& mgr = HighLevelGpuProgramManager::getSingleton();
         String progName = getFragmentProgramName(prof, terrain, tt);
 
+        String lang = mgr.isLanguageSupported("glsles") ? "glsles" : "glsl";
+
         HighLevelGpuProgramPtr ret = mgr.getByName(progName, ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME);
         if (!ret)
         {
-            ret = mgr.createProgram(progName, ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME, 
-                "glsl", GPT_FRAGMENT_PROGRAM);
+            ret = mgr.createProgram(progName, ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME,
+                                    lang, GPT_FRAGMENT_PROGRAM);
         }
         else
         {
@@ -79,26 +87,33 @@ namespace Ogre
     }
 
     //---------------------------------------------------------------------
-    void TerrainMaterialGeneratorA::SM2Profile::ShaderHelperGLSL::generateVpHeader(const SM2Profile* prof, const Terrain* terrain,
+    void ShaderHelperGLSL::generateVpHeader(const SM2Profile* prof, const Terrain* terrain,
                                                                                    TechniqueType tt, StringStream& outStream)
     {
-        outStream << "#version " << Root::getSingleton().getRenderSystem()->getNativeShadingLanguageVersion() << "\n";
+        int version = mIsGLES ? 100 : 120;
+
+        outStream << "#version "<< version << "\n";
+
+        if(mIsGLES) {
+            outStream << "precision highp int;\n";
+            outStream << "precision highp float;\n";
+        }
 
         bool compression = terrain->_getUseVertexCompression() && tt != RENDER_COMPOSITE_MAP;
         if (compression)
         {
             outStream <<
-                "in vec2 posIndex;\n"
-                "in float height;\n";
+                "attribute vec2 posIndex;\n"
+                "attribute float height;\n";
         }
         else
         {
             outStream <<
-                "in vec4 position;\n"
-                "in vec2 uv0;\n";
+                "attribute vec4 position;\n"
+                "attribute vec2 uv0;\n";
         }
         if (tt != RENDER_COMPOSITE_MAP)
-            outStream << "in vec2 delta;\n"; // lodDelta, lodThreshold
+            outStream << "attribute vec2 delta;\n"; // lodDelta, lodThreshold
 
         outStream <<
             "uniform mat4 worldMatrix;\n"
@@ -121,11 +136,11 @@ namespace Ogre
             outStream << "uniform vec4 uvMul_" << i << ";\n";
 
         outStream <<
-            "out vec4 oPosObj;\n";
+            "varying vec4 oPosObj;\n";
 
         uint texCoordSet = 1;
         outStream <<
-            "out vec4 oUVMisc; // xy = uv, z = camDepth\n";
+            "varying vec4 oUVMisc; // xy = uv, z = camDepth\n";
 
         // layer UV's premultiplied, packed as xy/zw
         uint numUVSets = numLayers / 2;
@@ -136,13 +151,13 @@ namespace Ogre
             for (uint i = 0; i < numUVSets; ++i)
             {
                 outStream <<
-                    "out vec4 layerUV" << i << ";\n";
+                    "varying vec4 layerUV" << i << ";\n";
             }
         }
 
         if (prof->getParent()->getDebugLevel() && tt != RENDER_COMPOSITE_MAP)
         {
-            outStream << "out vec2 lodInfo;\n";
+            outStream << "varying vec2 lodInfo;\n";
         }
 
         bool fog = terrain->getSceneManager()->getFogMode() != FOG_NONE && tt != RENDER_COMPOSITE_MAP;
@@ -150,7 +165,7 @@ namespace Ogre
         {
             outStream <<
                 "uniform vec4 fogParams;\n"
-                "out float fogVal;\n";
+                "varying float fogVal;\n";
         }
 
         if (prof->isShadowingEnabled(tt, terrain))
@@ -162,8 +177,7 @@ namespace Ogre
         if (texCoordSet > 8)
         {
             OGRE_EXCEPT(Exception::ERR_INVALIDPARAMS,
-                        "Requested options require too many texture coordinate sets! Try reducing the number of layers.",
-                        __FUNCTION__);
+                        "Requested options require too many texture coordinate sets! Try reducing the number of layers.");
         }
 
         outStream << "void main(void) {\n";
@@ -230,31 +244,27 @@ namespace Ogre
         }
     }
     //---------------------------------------------------------------------
-    void TerrainMaterialGeneratorA::SM2Profile::ShaderHelperGLSL::generateFpHeader(const SM2Profile* prof, const Terrain* terrain,
+    void ShaderHelperGLSL::generateFpHeader(const SM2Profile* prof, const Terrain* terrain,
                                                                                    TechniqueType tt, StringStream& outStream)
     {
+        int version = mIsGLES ? 100 : 120;
+
         // Main header
-        outStream <<
-            // helpers
-            "#version " << Root::getSingleton().getRenderSystem()->getNativeShadingLanguageVersion() << "\n"
-            "vec4 expand(vec4 v)\n"
-            "{\n"
-            "    return v * 2.0 - 1.0;\n"
-            "}\n\n"
-            // From http://substance.io/zauner/porting-vvvv-hlsl-shaders-to-vvvvjs
-            "vec4 lit(float NdotL, float NdotH, float m) {\n"
-            "    float ambient = 1.0;\n"
-            "    float diffuse = max(0.0, NdotL);\n"
-            "    float specular = step(0.0, NdotL) * max(NdotH, 0.0);\n"
-            "    return vec4(ambient, diffuse, specular, 1.0);\n"
-            "}\n\n";
+        outStream << "#version " << version << "\n";
+
+        if(mIsGLES) {
+            outStream << "precision highp int;\n";
+            outStream << "precision highp float;\n";
+        }
+
+        // helpers
+        outStream << "#include <TerrainHelpers.glsl>\n";
 
         if (prof->isShadowingEnabled(tt, terrain))
             generateFpDynamicShadowsHelpers(prof, terrain, tt, outStream);
 
-        outStream << "in vec4 oPosObj;\n"
-                     "in vec4 oUVMisc;\n"
-                     "out vec4 fragColour;\n";
+        outStream << "varying vec4 oPosObj;\n"
+                     "varying vec4 oUVMisc;\n";
 
         uint texCoordSet = 1;
 
@@ -270,12 +280,12 @@ namespace Ogre
             for (uint i = 0; i < numUVSets; ++i)
             {
                 outStream <<
-                    "in vec4 layerUV" << i << ";\n";
+                    "varying vec4 layerUV" << i << ";\n";
             }
         }
         if (prof->getParent()->getDebugLevel() && tt != RENDER_COMPOSITE_MAP)
         {
-            outStream << "in vec2 lodInfo;\n";
+            outStream << "varying vec2 lodInfo;\n";
         }
 
         bool fog = terrain->getSceneManager()->getFogMode() != FOG_NONE && tt != RENDER_COMPOSITE_MAP;
@@ -283,7 +293,7 @@ namespace Ogre
         {
             outStream <<
                 "uniform vec3 fogColour;\n"
-                "in float fogVal;\n";
+                "varying float fogVal;\n";
         }
 
         uint currentSamplerIdx = 0;
@@ -341,21 +351,20 @@ namespace Ogre
         if (currentSamplerIdx > 16)
         {
             OGRE_EXCEPT(Exception::ERR_INVALIDPARAMS,
-                        "Requested options require too many texture samplers! Try reducing the number of layers.",
-                        __FUNCTION__);
+                        "Requested options require too many texture samplers! Try reducing the number of layers.");
         }
 
         outStream << "void main(void) {\n"
             "    float shadow = 1.0;\n"
             "    vec2 uv = oUVMisc.xy;\n"
             // base colour
-            "    fragColour = vec4(0,0,0,1);\n";
+            "    gl_FragColor = vec4(0,0,0,1);\n";
 
         if (tt != LOW_LOD)
         {
             outStream <<
                 // global normal
-                "    vec3 normal = expand(texture(globalNormal, uv)).rgb;\n";
+                "    vec3 normal = expand(texture2D(globalNormal, uv)).rgb;\n";
         }
 
         outStream <<
@@ -371,7 +380,7 @@ namespace Ogre
         {
             // we just do a single calculation from composite map
             outStream <<
-                "    vec4 composite = texture(compositeMap, uv);\n"
+                "    vec4 composite = texture2D(compositeMap, uv);\n"
                 "    diffuse = composite.rgb;\n";
             // TODO - specular; we'll need normals for this!
         }
@@ -380,7 +389,7 @@ namespace Ogre
             // set up the blend values
             for (uint i = 0; i < numBlendTextures; ++i)
             {
-                outStream << "    vec4 blendTexVal" << i << " = texture(blendTex" << i << ", uv);\n";
+                outStream << "    vec4 blendTexVal" << i << " = texture2D(blendTex" << i << ", uv);\n";
             }
 
             if (prof->isLayerNormalMappingEnabled())
@@ -426,13 +435,13 @@ namespace Ogre
         }
     }
     //---------------------------------------------------------------------
-    void TerrainMaterialGeneratorA::SM2Profile::ShaderHelperGLSL::generateVpLayer(const SM2Profile* prof, const Terrain* terrain,
+    void ShaderHelperGLSL::generateVpLayer(const SM2Profile* prof, const Terrain* terrain,
                                                                                   TechniqueType tt, uint layer, StringStream& outStream)
     {
         // nothing to do
     }
     //---------------------------------------------------------------------
-    void TerrainMaterialGeneratorA::SM2Profile::ShaderHelperGLSL::generateFpLayer(const SM2Profile* prof, const Terrain* terrain,
+    void ShaderHelperGLSL::generateFpLayer(const SM2Profile* prof, const Terrain* terrain,
                                                                                   TechniqueType tt, uint layer, StringStream& outStream)
     {
         uint uvIdx = layer / 2;
@@ -456,13 +465,13 @@ namespace Ogre
             if (prof->isLayerParallaxMappingEnabled() && tt != RENDER_COMPOSITE_MAP)
             {
                 // modify UV - note we have to sample an extra time
-                outStream << "    displacement = texture(normtex" << layer << ", uv" << layer << ").a\n"
+                outStream << "    displacement = texture2D(normtex" << layer << ", uv" << layer << ").a\n"
                              "        * scaleBiasSpecular.x + scaleBiasSpecular.y;\n";
                 outStream << "    uv" << layer << " += TSeyeDir.xy * displacement;\n";
             }
 
             // access TS normal map
-            outStream << "    TSnormal = expand(texture(normtex" << layer << ", uv" << layer << ")).rgb;\n";
+            outStream << "    TSnormal = expand(texture2D(normtex" << layer << ", uv" << layer << ")).rgb;\n";
             outStream << "    TShalfAngle = normalize(TSlightDir + TSeyeDir);\n";
             outStream << "    litResLayer = lit(dot(TSnormal, TSlightDir), dot(TSnormal, TShalfAngle), scaleBiasSpecular.z);\n";
             if (!layer)
@@ -474,7 +483,7 @@ namespace Ogre
 
         // sample diffuse texture
         outStream << "    vec4 diffuseSpecTex" << layer
-            << " = texture(difftex" << layer << ", uv" << layer << ");\n";
+            << " = texture2D(difftex" << layer << ", uv" << layer << ");\n";
 
         // apply to common
         if (!layer)
@@ -499,7 +508,7 @@ namespace Ogre
          */
     }
     //---------------------------------------------------------------------
-    void TerrainMaterialGeneratorA::SM2Profile::ShaderHelperGLSL::generateVpFooter(const SM2Profile* prof, const Terrain* terrain,
+    void ShaderHelperGLSL::generateVpFooter(const SM2Profile* prof, const Terrain* terrain,
                                                                                    TechniqueType tt, StringStream& outStream)
     {
         outStream <<
@@ -527,7 +536,7 @@ namespace Ogre
         outStream << "}\n";
     }
     //---------------------------------------------------------------------
-    void TerrainMaterialGeneratorA::SM2Profile::ShaderHelperGLSL::generateFpFooter(const SM2Profile* prof, const Terrain* terrain,
+    void ShaderHelperGLSL::generateFpFooter(const SM2Profile* prof, const Terrain* terrain,
                                                                                    TechniqueType tt, StringStream& outStream)
     {
         if (tt == LOW_LOD)
@@ -536,12 +545,12 @@ namespace Ogre
             {
                 generateFpDynamicShadows(prof, terrain, tt, outStream);
                 outStream <<
-                    "    fragColour.rgb = diffuse * rtshadow;\n";
+                    "    gl_FragColor.rgb = diffuse * rtshadow;\n";
             }
             else
             {
                 outStream <<
-                    "    fragColour.rgb = diffuse;\n";
+                    "    gl_FragColor.rgb = diffuse;\n";
             }
         }
         else
@@ -549,12 +558,12 @@ namespace Ogre
             if (terrain->getGlobalColourMapEnabled() && prof->isGlobalColourMapEnabled())
             {
                 // sample colour map and apply to diffuse
-                outStream << "    diffuse *= texture(globalColourMap, uv).rgb;\n";
+                outStream << "    diffuse *= texture2D(globalColourMap, uv).rgb;\n";
             }
             if (prof->isLightmapEnabled())
             {
                 // sample lightmap
-                outStream << "    shadow = texture(lightMap, uv).r;\n";
+                outStream << "    shadow = texture2D(lightMap, uv).r;\n";
             }
 
             if (prof->isShadowingEnabled(tt, terrain))
@@ -563,7 +572,7 @@ namespace Ogre
             }
 
             // diffuse lighting
-            outStream << "    fragColour.rgb += ambient.rgb * diffuse + litRes.y * lightDiffuseColour * diffuse * shadow;\n";
+            outStream << "    gl_FragColor.rgb += ambient.rgb * diffuse + litRes.y * lightDiffuseColour * diffuse * shadow;\n";
 
             // specular default
             if (!prof->isLayerSpecularMappingEnabled())
@@ -573,16 +582,16 @@ namespace Ogre
             {
                 // Lighting embedded in alpha
                 outStream <<
-                    "    fragColour.a = shadow;\n";
+                    "    gl_FragColor.a = shadow;\n";
             }
             else
             {
                 // Apply specular
-                outStream << "    fragColour.rgb += litRes.z * lightSpecularColour * specular * shadow;\n";
+                outStream << "    gl_FragColor.rgb += litRes.z * lightSpecularColour * specular * shadow;\n";
 
                 if (prof->getParent()->getDebugLevel())
                 {
-                    outStream << "    fragColour.rg += lodInfo.xy;\n";
+                    outStream << "    gl_FragColor.rg += lodInfo.xy;\n";
                 }
             }
         }
@@ -590,63 +599,16 @@ namespace Ogre
         bool fog = terrain->getSceneManager()->getFogMode() != FOG_NONE && tt != RENDER_COMPOSITE_MAP;
         if (fog)
         {
-            outStream << "    fragColour.rgb = mix(fragColour.rgb, fogColour, fogVal);\n";
+            outStream << "    gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColour, fogVal);\n";
         }
 
         // Final return
         outStream << "}\n";
     }
     //---------------------------------------------------------------------
-    void TerrainMaterialGeneratorA::SM2Profile::ShaderHelperGLSL::generateFpDynamicShadowsHelpers(const SM2Profile* prof, const Terrain* terrain,
+    void ShaderHelperGLSL::generateFpDynamicShadowsHelpers(const SM2Profile* prof, const Terrain* terrain,
                                                                                                   TechniqueType tt, StringStream& outStream)
     {
-        // TODO make filtering configurable
-        outStream <<
-            "// Simple PCF \n"
-            "// Number of samples in one dimension (square for total samples) \n"
-            "#define NUM_SHADOW_SAMPLES_1D 2.0 \n"
-            "#define SHADOW_FILTER_SCALE 1 \n"
-
-            "#define SHADOW_SAMPLES NUM_SHADOW_SAMPLES_1D*NUM_SHADOW_SAMPLES_1D \n"
-
-            "vec4 offsetSample(vec4 uv, vec2 offset, float invMapSize) \n"
-            "{ \n"
-            "    return vec4(uv.xy + offset * invMapSize * uv.w, uv.z, uv.w); \n"
-            "} \n";
-
-        if (prof->getReceiveDynamicShadowsDepth())
-        {
-            outStream <<
-                "float calcDepthShadow(sampler2D shadowMap, vec4 uv, float invShadowMapSize) \n"
-                "{ \n"
-                "    // 4-sample PCF \n"
-
-                "    float shadow = 0.0; \n"
-                "    float offset = (NUM_SHADOW_SAMPLES_1D/2 - 0.5) * SHADOW_FILTER_SCALE; \n"
-                "    for (float y = -offset; y <= offset; y += SHADOW_FILTER_SCALE) \n"
-                "        for (float x = -offset; x <= offset; x += SHADOW_FILTER_SCALE) \n"
-                "        { \n"
-                "            vec4 newUV = offsetSample(uv, vec2(x, y), invShadowMapSize);\n"
-                "            // manually project and assign derivatives \n"
-                "            // to avoid gradient issues inside loops \n"
-                "            float depth = textureProjGrad(shadowMap, newUV.xyw, vec2(1.0), vec2(1.0)).x; \n"
-                "            if (depth >= 1 || depth >= uv.z)\n"
-                "                shadow += 1.0;\n"
-                "        } \n"
-
-                "    shadow /= SHADOW_SAMPLES; \n"
-                "    return shadow; \n"
-                "} \n";
-        }
-        else
-        {
-            outStream <<
-                "float calcSimpleShadow(sampler2D shadowMap, vec4 shadowMapPos) \n"
-                "{ \n"
-                "    return textureProj(shadowMap, shadowMapPos).x; \n"
-                "} \n";
-        }
-
         if (prof->getReceiveDynamicShadowsPSSM())
         {
             uint numTextures = prof->getReceiveDynamicShadowsPSSM()->getSplitCount();
@@ -710,7 +672,7 @@ namespace Ogre
         }
     }
     //---------------------------------------------------------------------
-    uint TerrainMaterialGeneratorA::SM2Profile::ShaderHelperGLSL::generateVpDynamicShadowsParams(uint texCoord, const SM2Profile* prof,
+    uint ShaderHelperGLSL::generateVpDynamicShadowsParams(uint texCoord, const SM2Profile* prof,
                                                                                                  const Terrain* terrain, TechniqueType tt,
                                                                                                  StringStream& outStream)
     {
@@ -723,19 +685,14 @@ namespace Ogre
         for (uint i = 0; i < numTextures; ++i)
         {
             outStream <<
-                "    out vec4 oLightSpacePos" << i << ";\n" <<
+                "    varying vec4 oLightSpacePos" << i << ";\n" <<
                 "    uniform mat4 texViewProjMatrix" << i << ";\n";
-            if (prof->getReceiveDynamicShadowsDepth())
-            {
-                outStream <<
-                    "    uniform vec4 depthRange" << i << "; // x = min, y = max, z = range, w = 1/range \n";
-            }
         }
 
         return texCoord;
     }
     //---------------------------------------------------------------------
-    void TerrainMaterialGeneratorA::SM2Profile::ShaderHelperGLSL::generateVpDynamicShadows(const SM2Profile* prof, const Terrain* terrain,
+    void ShaderHelperGLSL::generateVpDynamicShadows(const SM2Profile* prof, const Terrain* terrain,
                                                                                            TechniqueType tt, StringStream& outStream)
     {
         uint numTextures = 1;
@@ -749,12 +706,6 @@ namespace Ogre
         {
             outStream <<
                 "    oLightSpacePos" << i << " = texViewProjMatrix" << i << " * worldPos; \n";
-            if (prof->getReceiveDynamicShadowsDepth())
-            {
-                // make linear
-                outStream <<
-                    "oLightSpacePos" << i << ".z = (oLightSpacePos" << i << ".z - depthRange" << i << ".x) * depthRange" << i << ".w;\n";
-            }
         }
 
         if (prof->getReceiveDynamicShadowsPSSM())
@@ -765,7 +716,7 @@ namespace Ogre
         }
     }
     //---------------------------------------------------------------------
-    void TerrainMaterialGeneratorA::SM2Profile::ShaderHelperGLSL::generateFpDynamicShadowsParams(uint* texCoord, uint* sampler,
+    void ShaderHelperGLSL::generateFpDynamicShadowsParams(uint* texCoord, uint* sampler,
                                                                                                  const SM2Profile* prof, const Terrain* terrain,
                                                                                                  TechniqueType tt, StringStream& outStream)
     {
@@ -785,7 +736,7 @@ namespace Ogre
         for (uint i = 0; i < numTextures; ++i)
         {
             outStream <<
-                "in vec4 oLightSpacePos" << i << ";\n" <<
+                "varying vec4 oLightSpacePos" << i << ";\n" <<
                 "uniform sampler2D shadowMap" << i << ";\n";
             *sampler = *sampler + 1;
             *texCoord = *texCoord + 1;
@@ -797,7 +748,7 @@ namespace Ogre
         }
     }
     //---------------------------------------------------------------------
-    void TerrainMaterialGeneratorA::SM2Profile::ShaderHelperGLSL::generateFpDynamicShadows(const SM2Profile* prof, const Terrain* terrain,
+    void ShaderHelperGLSL::generateFpDynamicShadows(const SM2Profile* prof, const Terrain* terrain,
                                                                                            TechniqueType tt, StringStream& outStream)
     {
         if (prof->getReceiveDynamicShadowsPSSM())

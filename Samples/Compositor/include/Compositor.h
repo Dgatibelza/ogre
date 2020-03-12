@@ -58,7 +58,7 @@ class _OgreSampleClassExport Sample_Compositor : public SdkSample
     size_t mNumCompositorPages;
 
     //Used to unregister compositor logics and free memory
-    typedef map<String, CompositorLogic*>::type CompositorLogicMap;
+    typedef std::map<String, CompositorLogic*> CompositorLogicMap;
     CompositorLogicMap mCompositorLogics;
 
     String mDebugCompositorName;
@@ -116,6 +116,10 @@ void Sample_Compositor::setupContent(void)
     compMgr.registerCompositorLogic("HDR", mCompositorLogics["HDR"]);
     compMgr.registerCompositorLogic("HeatVision", mCompositorLogics["HeatVision"]);
 
+#ifdef OGRE_BUILD_COMPONENT_RTSHADERSYSTEM
+    mShaderGenerator->createScheme("HDR"); // make sure HDR viewport is handled
+#endif
+
     createTextures();
     /// Create a couple of hard coded postfilter effects as an example of how to do it
     /// but the preferred method is to use compositor scripts.
@@ -156,6 +160,9 @@ void Sample_Compositor::registerCompositors(void)
             continue;
         // Don't add the TestMRT compositor, it needs extra scene setup so doesn't currently work.
         if (Ogre::StringUtil::startsWith(compositorName, "TestMRT", false))
+            continue;
+        // Don't add the Compute compositors, thats a different demo.
+        if (Ogre::StringUtil::startsWith(compositorName, "Compute", false))
             continue;
 
         mCompositorNames.push_back(compositorName);
@@ -321,10 +328,12 @@ void Sample_Compositor::checkBoxToggled(OgreBites::CheckBox * box)
             CompositorInstance* instance = CompositorManager::getSingleton().getCompositorChain(mViewport)->getCompositor(compositorName);
             if (instance)
             {
-                CompositionTechnique::TextureDefinitionIterator it = instance->getTechnique()->getTextureDefinitionIterator();
-                while (it.hasMoreElements())
+                const CompositionTechnique::TextureDefinitions& defs =
+                    instance->getTechnique()->getTextureDefinitions();
+                CompositionTechnique::TextureDefinitions::const_iterator defIter;
+                for (defIter = defs.begin(); defIter != defs.end(); ++defIter)
                 {
-                    CompositionTechnique::TextureDefinition* texDef = it.getNext();
+                    CompositionTechnique::TextureDefinition* texDef = *defIter;
                     size_t numTextures = texDef->formatList.size();
                     if (numTextures > 1)
                     {
@@ -392,12 +401,13 @@ void Sample_Compositor::setupScene(void)
     mSceneMgr->setAmbientLight(Ogre::ColourValue(0.3, 0.3, 0.2));
 
     Ogre::Light* l = mSceneMgr->createLight("Light2");
-    Ogre::Vector3 dir(-1,-1,0);
-    dir.normalise();
     l->setType(Ogre::Light::LT_DIRECTIONAL);
-    l->setDirection(dir);
     l->setDiffuseColour(1, 1, 0.8);
     l->setSpecularColour(1, 1, 1);
+
+    auto ln = mSceneMgr->getRootSceneNode()->createChildSceneNode();
+    ln->setDirection(Vector3(-1,-1,0).normalisedCopy());
+    ln->attachObject(l);
 
 
     Ogre::Entity* pEnt;
@@ -466,8 +476,7 @@ void Sample_Compositor::createEffects(void)
     //                  {
     //                          CompositionTargetPass *tp = t->getOutputTargetPass();
     //                          tp->setInputMode(CompositionTargetPass::IM_NONE);
-    //                          { CompositionPass *pass = tp->createPass();
-    //                          pass->setType(CompositionPass::PT_RENDERQUAD);
+    //                          { CompositionPass *pass = tp->createPass(CompositionPass::PT_RENDERQUAD);
     //                          pass->setMaterialName("Ogre/Compositor/GlassPass");
     //                          pass->setInput(0, "rt0");
     //                          }
@@ -515,8 +524,7 @@ void Sample_Compositor::createEffects(void)
             Ogre::CompositionTargetPass *tp = t->createTargetPass();
             tp->setInputMode(Ogre::CompositionTargetPass::IM_NONE);
             tp->setOutputName("temp");
-            { Ogre::CompositionPass *pass = tp->createPass();
-                pass->setType(Ogre::CompositionPass::PT_RENDERQUAD);
+            { Ogre::CompositionPass *pass = tp->createPass(Ogre::CompositionPass::PT_RENDERQUAD);
                 pass->setMaterialName("Ogre/Compositor/Combine");
                 pass->setInput(0, "scene");
                 pass->setInput(1, "sum");
@@ -527,8 +535,7 @@ void Sample_Compositor::createEffects(void)
             Ogre::CompositionTargetPass *tp = t->createTargetPass();
             tp->setInputMode(Ogre::CompositionTargetPass::IM_NONE);
             tp->setOutputName("sum");
-            { Ogre::CompositionPass *pass = tp->createPass();
-                pass->setType(Ogre::CompositionPass::PT_RENDERQUAD);
+            { Ogre::CompositionPass *pass = tp->createPass(Ogre::CompositionPass::PT_RENDERQUAD);
                 pass->setMaterialName("Ogre/Compositor/Copyback");
                 pass->setInput(0, "temp");
             }
@@ -537,8 +544,7 @@ void Sample_Compositor::createEffects(void)
         {
             Ogre::CompositionTargetPass *tp = t->getOutputTargetPass();
             tp->setInputMode(Ogre::CompositionTargetPass::IM_NONE);
-            { Ogre::CompositionPass *pass = tp->createPass();
-                pass->setType(Ogre::CompositionPass::PT_RENDERQUAD);
+            { Ogre::CompositionPass *pass = tp->createPass(Ogre::CompositionPass::PT_RENDERQUAD);
                 pass->setMaterialName("Ogre/Compositor/MotionBlur");
                 pass->setInput(0, "sum");
             }
@@ -575,8 +581,7 @@ void Sample_Compositor::createEffects(void)
             tp->setInputMode(Ogre::CompositionTargetPass::IM_NONE);
             tp->setOutputName("temp");
             {
-                Ogre::CompositionPass *pass = tp->createPass();
-                pass->setType(Ogre::CompositionPass::PT_RENDERQUAD);
+                Ogre::CompositionPass *pass = tp->createPass(Ogre::CompositionPass::PT_RENDERQUAD);
                 pass->setIdentifier(0xDEADBABE); /// Identify pass for use in listener
                 pass->setMaterialName("Fury/HeatVision/LightToHeat");
                 pass->setInput(0, "scene");
@@ -587,8 +592,7 @@ void Sample_Compositor::createEffects(void)
             Ogre::CompositionTargetPass *tp = t->getOutputTargetPass();
             tp->setInputMode(Ogre::CompositionTargetPass::IM_NONE);
             {
-                Ogre::CompositionPass *pass = tp->createPass();
-                pass->setType(Ogre::CompositionPass::PT_RENDERQUAD);
+                Ogre::CompositionPass *pass = tp->createPass(Ogre::CompositionPass::PT_RENDERQUAD);
                 pass->setMaterialName("Fury/HeatVision/Blur");
                 pass->setInput(0, "temp");
             }
@@ -611,12 +615,19 @@ void Sample_Compositor::createTextures(void)
         TU_DYNAMIC_WRITE_ONLY
     );
 
+    MaterialManager::getSingleton()
+        .getByName("Ogre/Compositor/Halftone", "General")
+        ->getTechnique(0)
+        ->getPass(0)
+        ->getTextureUnitState("noise")
+        ->setTexture(tex);
+
     if(tex)
     {
         HardwarePixelBufferSharedPtr ptr = tex->getBuffer(0,0);
         ptr->lock(HardwareBuffer::HBL_DISCARD);
         const PixelBox &pb = ptr->getCurrentLock();
-        Ogre::uint8 *data = static_cast<Ogre::uint8*>(pb.data);
+        Ogre::uint8 *data = pb.data;
 
         size_t height = pb.getHeight();
         size_t width = pb.getWidth();
@@ -654,10 +665,17 @@ void Sample_Compositor::createTextures(void)
         TU_DYNAMIC_WRITE_ONLY
     );
 
+    MaterialManager::getSingleton()
+        .getByName("Ogre/Compositor/Dither", "General")
+        ->getTechnique(0)
+        ->getPass(0)
+        ->getTextureUnitState("noise")
+        ->setTexture(tex2);
+
     HardwarePixelBufferSharedPtr ptr2 = tex2->getBuffer(0,0);
     ptr2->lock(HardwareBuffer::HBL_DISCARD);
     const PixelBox &pb2 = ptr2->getCurrentLock();
-    Ogre::uint8 *data2 = static_cast<Ogre::uint8*>(pb2.data);
+    Ogre::uint8 *data2 = pb2.data;
 
     size_t height2 = pb2.getHeight();
     size_t width2 = pb2.getWidth();

@@ -28,7 +28,6 @@ THE SOFTWARE.
 #include "OgreStableHeaders.h"
 #include "OgreHardwarePixelBuffer.h"
 #include "OgreImage.h"
-#include "OgreException.h"
 
 namespace Ogre 
 {
@@ -53,7 +52,7 @@ namespace Ogre
     }
     
     //-----------------------------------------------------------------------------    
-    void* HardwarePixelBuffer::lock(size_t offset, size_t length, LockOptions options, UploadOptions uploadOpt)
+    void* HardwarePixelBuffer::lock(size_t offset, size_t length, LockOptions options)
     {
         assert(!isLocked() && "Cannot lock this buffer, it is already locked!");
         assert(offset == 0 && length == mSizeInBytes && "Cannot lock memory region, most lock box or entire buffer");
@@ -75,7 +74,7 @@ namespace Ogre
                 mShadowUpdated = true;
             }
 
-            mCurrentLock = static_cast<HardwarePixelBuffer*>(mShadowBuffer)->lock(lockBox, options);
+            mCurrentLock = static_cast<HardwarePixelBuffer*>(mShadowBuffer.get())->lock(lockBox, options);
         }
         else
         {
@@ -109,53 +108,38 @@ namespace Ogre
     {
         if(isLocked() || src->isLocked())
         {
-            OGRE_EXCEPT(Exception::ERR_INTERNAL_ERROR,
-                "Source and destination buffer may not be locked!",
-                "HardwarePixelBuffer::blit");
+            OGRE_EXCEPT(Exception::ERR_INTERNAL_ERROR, "Source and destination buffer may not be locked!");
         }
         if(src.get() == this)
         {
-            OGRE_EXCEPT( Exception::ERR_INVALIDPARAMS,
-                "Source must not be the same object",
-                "HardwarePixelBuffer::blit" ) ;
+            OGRE_EXCEPT(Exception::ERR_INVALIDPARAMS, "Source must not be the same object");
         }
-        const PixelBox &srclock = src->lock(srcBox, HBL_READ_ONLY);
 
-        LockOptions method = HBL_NORMAL;
-        if(dstBox.left == 0 && dstBox.top == 0 && dstBox.front == 0 &&
-           dstBox.right == mWidth && dstBox.bottom == mHeight &&
-           dstBox.back == mDepth)
+        LockOptions method = HBL_WRITE_ONLY;
+        if (dstBox.left == 0 && dstBox.top == 0 && dstBox.front == 0 && dstBox.right == mWidth &&
+            dstBox.bottom == mHeight && dstBox.back == mDepth)
             // Entire buffer -- we can discard the previous contents
             method = HBL_DISCARD;
-            
-        const PixelBox &dstlock = lock(dstBox, method);
-        if(dstlock.getWidth() != srclock.getWidth() ||
-            dstlock.getHeight() != srclock.getHeight() ||
-            dstlock.getDepth() != srclock.getDepth())
-        {
-            // Scaling desired
-            Image::scale(srclock, dstlock);
-        }
-        else
-        {
-            // No scaling needed
-            PixelUtil::bulkPixelConversion(srclock, dstlock);
-        }
 
+        src->blitToMemory(srcBox, lock(dstBox, method));
         unlock();
-        src->unlock();
     }
     //-----------------------------------------------------------------------------       
     void HardwarePixelBuffer::blit(const HardwarePixelBufferSharedPtr &src)
     {
-        blit(src, 
-            Box(0,0,0,src->getWidth(),src->getHeight(),src->getDepth()), 
-            Box(0,0,0,mWidth,mHeight,mDepth)
-        );
+        blit(src, Box(src->getSize()), Box(getSize()));
     }
     //-----------------------------------------------------------------------------    
     void HardwarePixelBuffer::readData(size_t offset, size_t length, void* pDest)
     {
+        // allow easy full buffer reads
+        if (offset == 0 && length == mSizeInBytes)
+        {
+            Box box(0, 0, 0, mWidth, mHeight, mDepth);
+            blitToMemory(box, PixelBox(box, mFormat, pDest));
+            return;
+        }
+
         // TODO
         OGRE_EXCEPT(Exception::ERR_NOT_IMPLEMENTED,
                 "Reading a byte range is not implemented. Use blitToMemory.",
@@ -166,6 +150,15 @@ namespace Ogre
     void HardwarePixelBuffer::writeData(size_t offset, size_t length, const void* pSource,
             bool discardWholeBuffer)
     {
+        // allow easy full buffer updates
+        if (offset == 0 && length == mSizeInBytes)
+        {
+            Box box(0, 0, 0, mWidth, mHeight, mDepth);
+            // we know pSource will not be written to
+            blitFromMemory(PixelBox(box, mFormat, const_cast<void*>(pSource)), box);
+            return;
+        }
+
         // TODO
         OGRE_EXCEPT(Exception::ERR_NOT_IMPLEMENTED,
                 "Writing a byte range is not implemented. Use blitFromMemory.",

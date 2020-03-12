@@ -44,8 +44,8 @@ namespace Ogre {
     * Implementation of GL ES 2.x as a rendering system.
     *  @{
     */
-    class GLRTTManager;
-    class GLES2GpuProgramManager;
+    class GLES2FBOManager;
+    class GpuProgramManager;
     class GLSLESProgramCommon;
     class GLSLESProgramFactory;
     class GLES2StateCacheManager;
@@ -70,50 +70,39 @@ namespace Ogre {
             /// Holds texture type settings for every stage
             GLenum mTextureTypes[OGRE_MAX_TEXTURE_LAYERS];
 
-            /// GL support class, used for creating windows etc.
-            GLES2Support *mGLSupport;
-
             /// State cache manager which responsible to reduce redundant state changes
             GLES2StateCacheManager* mStateCacheManager;
 
-            typedef list<GLContext*>::type GLContextList;
-            /// List of background thread contexts
-            GLContextList mBackgroundContextList;
-
-            GLES2GpuProgramManager *mGpuProgramManager;
+            GpuProgramManager *mGpuProgramManager;
             GLSLESProgramFactory* mGLSLESProgramFactory;
 #if !OGRE_NO_GLES2_CG_SUPPORT
             GLSLESCgProgramFactory* mGLSLESCgProgramFactory;
 #endif
             HardwareBufferManager* mHardwareBufferManager;
 
-            /** Manager object for creating render textures.
-                Direct render to texture via GL_OES_framebuffer_object is preferable 
-                to pbuffers, which depend on the GL support used and are generally 
-                unwieldy and slow. However, FBO support for stencil buffers is poor.
-              */
-            GLRTTManager *mRTTManager;
-
             /// Check if the GL system has already been initialised
             bool mGLInitialised;
 
             // local data member of _render that were moved here to improve performance
             // (save allocations)
-            vector<GLuint>::type mRenderAttribsBound;
-            vector<GLuint>::type mRenderInstanceAttribsBound;
+            std::vector<GLuint> mRenderAttribsBound;
+            std::vector<GLuint> mRenderInstanceAttribsBound;
 
             GLenum mPolygonMode;
-
-            GLint getCombinedMinMipFilter(void) const;
 
             GLSLESProgram* mCurrentVertexProgram;
             GLSLESProgram* mCurrentFragmentProgram;
 
-            GLint getTextureAddressingMode(TextureUnitState::TextureAddressingMode tam) const;
+            GLint getTextureAddressingMode(TextureAddressingMode tam) const;
             GLenum getBlendMode(SceneBlendFactor ogreBlend) const;
             void bindVertexElementToGpu(const VertexElement& elem,
                                         const HardwareVertexBufferSharedPtr& vertexBuffer,
                                         const size_t vertexStart);
+
+            /** Initialises GL extensions, must be done AFTER the GL context has been
+                established.
+            */
+            void initialiseExtensions();
 
             // Mipmap count of the actual bounded texture
             size_t mCurTexMipCount;
@@ -134,13 +123,7 @@ namespace Ogre {
 
             const String& getName(void) const;
 
-            ConfigOptionMap& getConfigOptions(void);
-
-            void setConfigOption(const String &name, const String &value);
-
-            String validateConfigOptions(void);
-
-            RenderWindow* _initialise(bool autoCreateWindow, const String& windowTitle = "OGRE Render NativeWindowType");
+            void _initialise() override;
 
             virtual RenderSystemCapabilities* createRenderSystemCapabilities() const;
 
@@ -155,10 +138,6 @@ namespace Ogre {
             /// @copydoc RenderSystem::_createDepthBufferFor
             DepthBuffer* _createDepthBufferFor( RenderTarget *renderTarget );
 
-            /// Mimics D3D9RenderSystem::_getDepthStencilFormatFor, if no FBO RTT manager, outputs GL_NONE
-            void _getDepthStencilFormatFor( PixelFormat internalColourFormat, GLenum *depthFormat,
-                                            GLenum *stencilFormat );
-
             /// @copydoc RenderSystem::createMultiRenderTarget
             virtual MultiRenderTarget * createMultiRenderTarget(const String & name);
 
@@ -168,23 +147,13 @@ namespace Ogre {
             // -----------------------------
             // Low-level overridden members
             // -----------------------------
-
-            bool areFixedFunctionLightsInViewSpace() const { return true; }
-
-            void _setPointParameters(Real size, bool attenuationEnabled,
-                                     Real constant, Real linear, Real quadratic, Real minSize, Real maxSize) {}
-
-            void _setPointSpritesEnabled(bool enabled) {}
-
             void _setTexture(size_t unit, bool enabled, const TexturePtr &tex);
 
-            void _setTextureCoordSet(size_t stage, size_t index);
+            void _setSampler(size_t unit, Sampler& sampler);
 
-            void _setTextureAddressingMode(size_t stage, const TextureUnitState::UVWAddressingMode& uvw);
+            void _setTextureAddressingMode(size_t stage, const Sampler::UVWAddressingMode& uvw);
 
-            void _setTextureBorderColour(size_t stage, const ColourValue& colour) { };   // Not supported
-
-            void _setTextureMipmapBias(size_t unit, float bias) { };   // Not supported
+            void _setLineWidth(float width);
 
             void _setViewport(Viewport *vp);
 
@@ -218,18 +187,10 @@ namespace Ogre {
                     bool twoSidedOperation = false,
                     bool readBackAsTexture = false);
 
-            void _setTextureUnitCompareFunction(size_t unit, CompareFunction function);
-
-            void _setTextureUnitCompareEnabled(size_t unit, bool compare);          
-
             virtual void _setTextureUnitFiltering(size_t unit, FilterOptions minFilter,
                 FilterOptions magFilter, FilterOptions mipFilter);              
 
             void _setTextureUnitFiltering(size_t unit, FilterType ftype, FilterOptions filter);
-
-            void _setTextureLayerAnisotropy(size_t unit, unsigned int maxAnisotropy);
-
-            virtual bool hasAnisotropicMipMapFilter() const { return false; }   
 
             void _render(const RenderOperation& op);
 
@@ -239,20 +200,10 @@ namespace Ogre {
                 const ColourValue& colour = ColourValue::Black,
                 Real depth = 1.0f, unsigned short stencil = 0);
             HardwareOcclusionQuery* createHardwareOcclusionQuery(void);
-            OGRE_MUTEX(mThreadInitMutex);
-            void registerThread();
-            void unregisterThread();
-            void preExtraThreadsStarted();
-            void postExtraThreadsStarted();
-            void setClipPlanesImpl(const Ogre::PlaneList& planeList) {}
-            GLES2Support* getGLSupportRef() { return mGLSupport; }
 
             // ----------------------------------
             // GLES2RenderSystem specific members
-            // ----------------------------------
-            bool hasMinGLVersion(int major, int minor) const;
-            bool checkExtension(const String& ext) const;
-        
+            // ----------------------------------        
             GLES2StateCacheManager * _getStateCacheManager() { return mStateCacheManager; }
         
             /** Create VAO on current context */
@@ -261,6 +212,8 @@ namespace Ogre {
             void _bindVao(GLContext* context, uint32 vao);
             /** Destroy VAO immediately or defer if it was created on other context */
             void _destroyVao(GLContext* context, uint32 vao);
+            /** Destroy FBO immediately or defer if it was created on other context */
+            void _destroyFbo(GLContext* context, uint32 fbo);
 
             /** Unregister a render target->context mapping. If the context of target 
              is the current context, change the context to the main context so it
@@ -273,9 +226,6 @@ namespace Ogre {
             /** Switch GL context, dealing with involved internal cached states too
              */
             void _switchContext(GLContext *context);
-            /** One time initialization for the RenderState of a context. Things that
-             only need to be set once, like the LightingModel can be defined here.
-             */
             void _oneTimeContextInitialization();
             void initialiseContext(RenderWindow* primary);
             /**
@@ -288,20 +238,14 @@ namespace Ogre {
 
             void bindGpuProgram(GpuProgram* prg);
             void unbindGpuProgram(GpuProgramType gptype);
-            void bindGpuProgramParameters(GpuProgramType gptype, GpuProgramParametersSharedPtr params, uint16 mask);
-            void bindGpuProgramPassIterationParameters(GpuProgramType gptype);
+            void bindGpuProgramParameters(GpuProgramType gptype, const GpuProgramParametersPtr& params, uint16 mask);
 
-            /// @copydoc RenderSystem::_setSceneBlending
-            void _setSceneBlending( SceneBlendFactor sourceFactor, SceneBlendFactor destFactor, SceneBlendOperation op );
             /// @copydoc RenderSystem::_setSeparateSceneBlending
             void _setSeparateSceneBlending( SceneBlendFactor sourceFactor, SceneBlendFactor destFactor, SceneBlendFactor sourceFactorAlpha, SceneBlendFactor destFactorAlpha, SceneBlendOperation op, SceneBlendOperation alphaOp );
             /// @copydoc RenderSystem::_setAlphaRejectSettings
             void _setAlphaRejectSettings( CompareFunction func, unsigned char value, bool alphaToCoverage );
             /// @copydoc RenderSystem::getDisplayMonitorCount
             unsigned int getDisplayMonitorCount() const;
-
-            void _setSceneBlendingOperation(SceneBlendOperation op);
-            void _setSeparateSceneBlendingOperation(SceneBlendOperation op, SceneBlendOperation alphaOp);
 
             void _destroyDepthBuffer(RenderTarget* pRenderWnd);
         

@@ -24,18 +24,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 -----------------------------------------------------------------------------
 */
-#include "OgreShaderExNormalMapLighting.h"
+#include "OgreShaderPrecompiledHeaders.h"
 #ifdef RTSHADER_SYSTEM_BUILD_EXT_SHADERS
-#include "OgreShaderFFPRenderState.h"
-#include "OgreShaderProgram.h"
-#include "OgreShaderParameter.h"
-#include "OgreShaderProgramSet.h"
-#include "OgreAutoParamDataSource.h"
-#include "OgreShaderRenderState.h"
-#include "OgrePass.h"
-#include "OgreMaterialSerializer.h"
-#include "OgreShaderGenerator.h"
-#include "OgreShaderFFPTexturing.h"
 
 namespace Ogre {
 namespace RTShader {
@@ -45,25 +35,14 @@ namespace RTShader {
 /************************************************************************/
 String NormalMapLighting::Type                      = "SGX_NormalMapLighting";
 
-Light NormalMapLighting::msBlankLight;
-
 //-----------------------------------------------------------------------
-NormalMapLighting::NormalMapLighting()
+NormalMapLighting::NormalMapLighting() : PerPixelLighting()
 {
-    mTrackVertexColourType          = TVC_NONE;
     mNormalMapSamplerIndex          = 0;
     mVSTexCoordSetIndex             = 0;
-    mSpecularEnable                 = false;
     mNormalMapSpace                 = NMS_TANGENT;
-    mNormalMapMinFilter             = FO_LINEAR;
-    mNormalMapMagFilter             = FO_LINEAR;
-    mNormalMapMipFilter             = FO_POINT;
-    mNormalMapAnisotropy            = 1;
-    mNormalMapMipBias               = -1.0;
-
-    msBlankLight.setDiffuseColour(ColourValue::Black);
-    msBlankLight.setSpecularColour(ColourValue::Black);
-    msBlankLight.setAttenuation(0,1,0,0);
+    mNormalMapSampler = TextureManager::getSingleton().createSampler();
+    mNormalMapSampler->setMipmapBias(-1.0);
 }
 
 //-----------------------------------------------------------------------
@@ -72,15 +51,8 @@ const String& NormalMapLighting::getType() const
     return Type;
 }
 
-
 //-----------------------------------------------------------------------
-int NormalMapLighting::getExecutionOrder() const
-{
-    return FFP_LIGHTING;
-}
-
-//-----------------------------------------------------------------------
-void NormalMapLighting::updateGpuProgramsParams(Renderable* rend, Pass* pass, const AutoParamDataSource* source, 
+void NormalMapLighting::updateGpuProgramsParams(Renderable* rend, const Pass* pass, const AutoParamDataSource* source,
     const LightList* pLightList)
 {       
     if (mLightParamsList.empty())
@@ -88,19 +60,9 @@ void NormalMapLighting::updateGpuProgramsParams(Renderable* rend, Pass* pass, co
 
     Light::LightTypes curLightType = Light::LT_DIRECTIONAL; 
     unsigned int curSearchLightIndex = 0;
-    const Matrix4& matWorld = source->getWorldMatrix();
-    Matrix3 matWorldInvRotation;
-    Vector3 vRow0(matWorld[0][0], matWorld[0][1], matWorld[0][2]); 
-    Vector3 vRow1(matWorld[1][0], matWorld[1][1], matWorld[1][2]); 
-    Vector3 vRow2(matWorld[2][0], matWorld[2][1], matWorld[2][2]); 
 
-    vRow0.normalise();
-    vRow1.normalise();
-    vRow2.normalise();
-
-    matWorldInvRotation.SetColumn(0, vRow0);
-    matWorldInvRotation.SetColumn(1, vRow1);
-    matWorldInvRotation.SetColumn(2, vRow2);
+    // We need the inverse of the inverse transpose
+    Matrix3 matWorldInvRotation = source->getTransposeWorldMatrix().linear();
 
     // Update inverse rotation parameter.
     if (mWorldInvRotMatrix.get() != NULL)   
@@ -117,27 +79,16 @@ void NormalMapLighting::updateGpuProgramsParams(Renderable* rend, Pass* pass, co
             curSearchLightIndex = 0;
         }
 
-        Light*      srcLight = NULL;
-        Vector4     vParameter;
-        ColourValue colour;
-
         // Search a matching light from the current sorted lights of the given renderable.
-        for (unsigned int j = curSearchLightIndex; j < pLightList->size(); ++j)
+        size_t j;
+        for (j = curSearchLightIndex; j < pLightList->size(); ++j)
         {
             if (pLightList->at(j)->getType() == curLightType)
             {               
-                srcLight = pLightList->at(j);
                 curSearchLightIndex = j + 1;
                 break;
             }           
         }
-
-        // No matching light found -> use a blank dummy light for parameter update.
-        if (srcLight == NULL)
-        {                       
-            srcLight = &msBlankLight;
-        }
-
 
         switch (curParams.mType)
         {
@@ -146,29 +97,15 @@ void NormalMapLighting::updateGpuProgramsParams(Renderable* rend, Pass* pass, co
                 Vector3 vec3;                           
 
                 // Update light direction. (Object space).
-                vec3 = matWorldInvRotation * srcLight->getDerivedDirection();               
-                vec3.normalise();
-
-                vParameter.x = -vec3.x;
-                vParameter.y = -vec3.y;
-                vParameter.z = -vec3.z;
-                vParameter.w = 0.0;
-                curParams.mDirection->setGpuParameter(vParameter);
+                vec3 = matWorldInvRotation * source->getLightDirection(j);
+                curParams.mDirection->setGpuParameter(Vector4(-vec3.normalisedCopy(), 0.0f));
             }
             break;
 
         case Light::LT_POINT:
-
-            // Update light position. (World space).                
-            vParameter = srcLight->getAs4DVector(true);
-            curParams.mPosition->setGpuParameter(vParameter);
-
-            // Update light attenuation parameters.
-            vParameter.x = srcLight->getAttenuationRange();
-            vParameter.y = srcLight->getAttenuationConstant();
-            vParameter.z = srcLight->getAttenuationLinear();
-            vParameter.w = srcLight->getAttenuationQuadric();
-            curParams.mAttenuatParams->setGpuParameter(vParameter);
+            // update light index. data will be set by scene manager
+            curParams.mPosition->updateExtraInfo(j);
+            curParams.mAttenuatParams->updateExtraInfo(j);
             break;
 
         case Light::LT_SPOTLIGHT:
@@ -176,261 +113,141 @@ void NormalMapLighting::updateGpuProgramsParams(Renderable* rend, Pass* pass, co
                 Vector3 vec3;               
                                             
                 // Update light position. (World space).                
-                vParameter = srcLight->getAs4DVector(true);
-                curParams.mPosition->setGpuParameter(vParameter);
+                curParams.mPosition->updateExtraInfo(j);
+                curParams.mAttenuatParams->updateExtraInfo(j);
+                curParams.mSpotParams->updateExtraInfo(j);
 
-                            
                 // Update light direction. (Object space).
-                vec3 = matWorldInvRotation * srcLight->getDerivedDirection();               
-                vec3.normalise();
-            
-                vParameter.x = -vec3.x;
-                vParameter.y = -vec3.y;
-                vParameter.z = -vec3.z;
-                vParameter.w = 0.0;
-                curParams.mDirection->setGpuParameter(vParameter);                          
-                
-                // Update light attenuation parameters.
-                vParameter.x = srcLight->getAttenuationRange();
-                vParameter.y = srcLight->getAttenuationConstant();
-                vParameter.z = srcLight->getAttenuationLinear();
-                vParameter.w = srcLight->getAttenuationQuadric();
-                curParams.mAttenuatParams->setGpuParameter(vParameter);
-
-                // Update spotlight parameters.
-                Real phi   = Math::Cos(srcLight->getSpotlightOuterAngle().valueRadians() * 0.5f);
-                Real theta = Math::Cos(srcLight->getSpotlightInnerAngle().valueRadians() * 0.5f);
-
-                vec3.x = theta;
-                vec3.y = phi;
-                vec3.z = srcLight->getSpotlightFalloff();
-
-                curParams.mSpotParams->setGpuParameter(vec3);
+                vec3 = matWorldInvRotation * source->getLightDirection(j);
+                curParams.mDirection->setGpuParameter(Vector4(-vec3.normalisedCopy(), 0.0f));
             }
             break;
         }
 
 
         // Update diffuse colour.
-        if ((mTrackVertexColourType & TVC_DIFFUSE) == 0)
-        {
-            colour = srcLight->getDiffuseColour() * pass->getDiffuse() * srcLight->getPowerScale();
-            curParams.mDiffuseColour->setGpuParameter(colour);                  
-        }
-        else
-        {                   
-            colour = srcLight->getDiffuseColour() * srcLight->getPowerScale();
-            curParams.mDiffuseColour->setGpuParameter(colour);  
-        }
+        curParams.mDiffuseColour->updateExtraInfo(j);
 
         // Update specular colour if need to.
         if (mSpecularEnable)
         {
-            // Update diffuse colour.
-            if ((mTrackVertexColourType & TVC_SPECULAR) == 0)
-            {
-                colour = srcLight->getSpecularColour() * pass->getSpecular() * srcLight->getPowerScale();
-                curParams.mSpecularColour->setGpuParameter(colour);                 
-            }
-            else
-            {                   
-                colour = srcLight->getSpecularColour() * srcLight->getPowerScale();
-                curParams.mSpecularColour->setGpuParameter(colour); 
-            }
+            curParams.mSpecularColour->updateExtraInfo(j);
         }                                                                           
     }
 }
 
 //-----------------------------------------------------------------------
-bool NormalMapLighting::resolveParameters(ProgramSet* programSet)
-{
-    if (false == resolveGlobalParameters(programSet))
-        return false;
-    
-    if (false == resolvePerLightParameters(programSet))
-        return false;
-    
-    return true;
-}
-
-//-----------------------------------------------------------------------
 bool NormalMapLighting::resolveGlobalParameters(ProgramSet* programSet)
 {
-    bool hasError = false;
-    Program* vsProgram = programSet->getCpuVertexProgram();
-    Program* psProgram = programSet->getCpuFragmentProgram();
+    Program* vsProgram = programSet->getCpuProgram(GPT_VERTEX_PROGRAM);
+    Program* psProgram = programSet->getCpuProgram(GPT_FRAGMENT_PROGRAM);
     Function* vsMain = vsProgram->getEntryPointFunction();
     Function* psMain = psProgram->getEntryPointFunction();
     
-    // Resolve normal map texture sampler parameter.        
-    mNormalMapSampler = psProgram->resolveParameter(GCT_SAMPLER2D, mNormalMapSamplerIndex, (uint16)GPV_PER_OBJECT, "gNormalMapSampler");
+    // Resolve normal map texture sampler parameter.
+    if(!mLightParamsList.empty())
+        mPSNormalMapSampler = psProgram->resolveParameter(GCT_SAMPLER2D, mNormalMapSamplerIndex, (uint16)GPV_PER_OBJECT, "gNormalMapSampler");
 
-	if (Ogre::RTShader::ShaderGenerator::getSingletonPtr()->IsHlsl4())
-		mNormalMapSamplerState = psProgram->resolveParameter(GCT_SAMPLER_STATE, mNormalMapSamplerIndex, (uint16)GPV_PER_OBJECT, "gNormalMapSamplerState");
-    
     // Get surface ambient colour if need to.
     if ((mTrackVertexColourType & TVC_AMBIENT) == 0)
     {       
-        mDerivedAmbientLightColour = psProgram->resolveAutoParameterInt(GpuProgramParameters::ACT_DERIVED_AMBIENT_LIGHT_COLOUR, 0);
-        hasError |= !(mDerivedAmbientLightColour.get());
+        mDerivedAmbientLightColour = psProgram->resolveParameter(GpuProgramParameters::ACT_DERIVED_AMBIENT_LIGHT_COLOUR);
     }
     else
     {
-        mLightAmbientColour = psProgram->resolveAutoParameterInt(GpuProgramParameters::ACT_AMBIENT_LIGHT_COLOUR, 0);
-        mSurfaceAmbientColour = psProgram->resolveAutoParameterInt(GpuProgramParameters::ACT_SURFACE_AMBIENT_COLOUR, 0);
-    
-        hasError |= !(mDerivedAmbientLightColour.get()) || !(mLightAmbientColour.get());
+        mLightAmbientColour = psProgram->resolveParameter(GpuProgramParameters::ACT_AMBIENT_LIGHT_COLOUR);
     }
-
-    // Get surface diffuse colour if need to.
-    if ((mTrackVertexColourType & TVC_DIFFUSE) == 0)
-    {
-        mSurfaceDiffuseColour = psProgram->resolveAutoParameterInt(GpuProgramParameters::ACT_SURFACE_DIFFUSE_COLOUR, 0);
-        hasError |= !(mSurfaceDiffuseColour.get());
-    }
-
-    // Get surface specular colour if need to.
-    if ((mTrackVertexColourType & TVC_SPECULAR) == 0)
-    {
-        mSurfaceSpecularColour = psProgram->resolveAutoParameterInt(GpuProgramParameters::ACT_SURFACE_SPECULAR_COLOUR, 0);
-        hasError |= !(mSurfaceSpecularColour.get());
-    }
-
 
     // Get surface emissive colour if need to.
     if ((mTrackVertexColourType & TVC_EMISSIVE) == 0)
     {
-        mSurfaceEmissiveColour = psProgram->resolveAutoParameterInt(GpuProgramParameters::ACT_SURFACE_EMISSIVE_COLOUR, 0);
-        hasError |= !(mSurfaceEmissiveColour.get());
+        mSurfaceEmissiveColour = psProgram->resolveParameter(GpuProgramParameters::ACT_SURFACE_EMISSIVE_COLOUR);
     }
 
     // Get derived scene colour.
-    mDerivedSceneColour = psProgram->resolveAutoParameterInt(GpuProgramParameters::ACT_DERIVED_SCENE_COLOUR, 0);
+    mDerivedSceneColour = psProgram->resolveParameter(GpuProgramParameters::ACT_DERIVED_SCENE_COLOUR);
 
     // Get surface shininess.
-    mSurfaceShininess = psProgram->resolveAutoParameterInt(GpuProgramParameters::ACT_SURFACE_SHININESS, 0);
+    mSurfaceShininess = psProgram->resolveParameter(GpuProgramParameters::ACT_SURFACE_SHININESS);
 
     // Resolve input vertex shader normal.
-    mVSInNormal = vsMain->resolveInputParameter(Parameter::SPS_NORMAL, 0, Parameter::SPC_NORMAL_OBJECT_SPACE, GCT_FLOAT3);
+    mVSInNormal = vsMain->resolveInputParameter(Parameter::SPC_NORMAL_OBJECT_SPACE);
+
+    auto normalContent = Parameter::SPC_NORMAL_OBJECT_SPACE;
+    auto posContent = Parameter::SPC_POSTOCAMERA_OBJECT_SPACE;
 
     // Resolve input vertex shader tangent.
-    if (mNormalMapSpace == NMS_TANGENT)
+    if (mNormalMapSpace & NMS_TANGENT)
     {
-        mVSInTangent = vsMain->resolveInputParameter(Parameter::SPS_TANGENT, 0, Parameter::SPC_TANGENT_OBJECT_SPACE, GCT_FLOAT3);
+        mVSInTangent = vsMain->resolveInputParameter(Parameter::SPC_TANGENT_OBJECT_SPACE);
         
         // Resolve local vertex shader TNB matrix.
-        mVSTBNMatrix = vsMain->resolveLocalParameter(Parameter::SPS_UNKNOWN, 0, "lMatTBN", GCT_MATRIX_3X3);
-        
-        hasError |= !(mVSTBNMatrix.get()) || !(mVSInTangent.get());
+        mVSTBNMatrix = vsMain->resolveLocalParameter("lMatTBN", GCT_MATRIX_3X3);
+
+        normalContent = Parameter::SPC_NORMAL_TANGENT_SPACE;
+        posContent = Parameter::SPC_POSTOCAMERA_TANGENT_SPACE;
     }
     
     // Resolve input vertex shader texture coordinates.
-    mVSInTexcoord = vsMain->resolveInputParameter(Parameter::SPS_TEXTURE_COORDINATES, mVSTexCoordSetIndex, 
-        Parameter::Content(Parameter::SPC_TEXTURE_COORDINATE0 + mVSTexCoordSetIndex),
-        GCT_FLOAT2);
-
-    // Resolve output vertex shader texture coordinates.
-    mVSOutTexcoord = vsMain->resolveOutputParameter(Parameter::SPS_TEXTURE_COORDINATES, -1, 
-        Parameter::Content(Parameter::SPC_TEXTURE_COORDINATE0 + mVSTexCoordSetIndex),
-        GCT_FLOAT2);
-    
-    // Resolve pixel input texture coordinates normal.
-    mPSInTexcoord = psMain->resolveInputParameter(Parameter::SPS_TEXTURE_COORDINATES, 
-        mVSOutTexcoord->getIndex(), 
-        mVSOutTexcoord->getContent(),
-        mVSOutTexcoord->getType());
+    mVSInTexcoord = vsMain->resolveInputParameter(
+        Parameter::Content(Parameter::SPC_TEXTURE_COORDINATE0 + mVSTexCoordSetIndex), GCT_FLOAT2);
+    mVSOutTexcoord = vsMain->resolveOutputParameter(
+        Parameter::Content(Parameter::SPC_TEXTURE_COORDINATE0 + mVSTexCoordSetIndex), GCT_FLOAT2);
+    mPSInTexcoord = psMain->resolveInputParameter(mVSOutTexcoord);
 
     // Resolve pixel shader normal.
-    if (mNormalMapSpace == NMS_OBJECT)
-    {
-        mPSNormal = psMain->resolveLocalParameter(Parameter::SPS_NORMAL, 0, Parameter::SPC_NORMAL_OBJECT_SPACE, GCT_FLOAT4);
-        hasError |= !(mPSNormal.get());
-    }
-    else if (mNormalMapSpace == NMS_TANGENT)
-    {
-        mPSNormal = psMain->resolveLocalParameter(Parameter::SPS_NORMAL, 0, Parameter::SPC_NORMAL_TANGENT_SPACE, GCT_FLOAT4);
-        hasError |= !(mPSNormal.get());
-    }
-    
+    mViewNormal = psMain->resolveLocalParameter(normalContent, GCT_FLOAT3);
 
-    const ShaderParameterList& inputParams = psMain->getInputParameters();
-    const ShaderParameterList& localParams = psMain->getLocalParameters();
-
-    mPSDiffuse = psMain->getParameterByContent(inputParams, Parameter::SPC_COLOR_DIFFUSE, GCT_FLOAT4);
-    if (mPSDiffuse.get() == NULL)
+    mInDiffuse = psMain->getInputParameter(Parameter::SPC_COLOR_DIFFUSE);
+    if (mInDiffuse.get() == NULL)
     {
-        mPSDiffuse = psMain->getParameterByContent(localParams, Parameter::SPC_COLOR_DIFFUSE, GCT_FLOAT4);
+        mInDiffuse = psMain->getLocalParameter(Parameter::SPC_COLOR_DIFFUSE);
     }
+    OgreAssert(mInDiffuse, "mInDiffuse is NULL");
 
-    mPSOutDiffuse = psMain->resolveOutputParameter(Parameter::SPS_COLOR, 0, Parameter::SPC_COLOR_DIFFUSE, GCT_FLOAT4);
-    mPSTempDiffuseColour = psMain->resolveLocalParameter(Parameter::SPS_UNKNOWN, 0, "lNormalMapDiffuse", GCT_FLOAT4);
+    mOutDiffuse = psMain->resolveOutputParameter(Parameter::SPC_COLOR_DIFFUSE);
 
     if (mSpecularEnable)
     {
-        mPSSpecular = psMain->getParameterByContent(inputParams, Parameter::SPC_COLOR_SPECULAR, GCT_FLOAT4);
-        if (mPSSpecular.get() == NULL)
-        {
-            mPSSpecular = psMain->getParameterByContent(localParams, Parameter::SPC_COLOR_SPECULAR, GCT_FLOAT4);
-        }
+        mOutSpecular = psMain->resolveLocalParameter(Parameter::SPC_COLOR_SPECULAR);
 
-        mPSTempSpecularColour = psMain->resolveLocalParameter(Parameter::SPS_UNKNOWN, 0, "lNormalMapSpecular", GCT_FLOAT4);
-        mVSInPosition = vsMain->resolveInputParameter(Parameter::SPS_POSITION, 0, Parameter::SPC_POSITION_OBJECT_SPACE, GCT_FLOAT4);
-
-        if (mNormalMapSpace == NMS_TANGENT)
-        {
-            mVSOutView = vsMain->resolveOutputParameter(Parameter::SPS_TEXTURE_COORDINATES, -1, 
-                Parameter::SPC_POSTOCAMERA_TANGENT_SPACE, GCT_FLOAT3);
-            hasError |= !(mVSOutView.get());
-        }
-        else if (mNormalMapSpace == NMS_OBJECT)
-        {
-            mVSOutView = vsMain->resolveOutputParameter(Parameter::SPS_TEXTURE_COORDINATES, -1, 
-                Parameter::SPC_POSTOCAMERA_OBJECT_SPACE, GCT_FLOAT3);
-            hasError |= !(mVSOutView.get());
-        }
-        
-
-        mPSInView = psMain->resolveInputParameter(Parameter::SPS_TEXTURE_COORDINATES, 
-            mVSOutView->getIndex(), 
-            mVSOutView->getContent(),
-            mVSOutView->getType());
+        mVSInPosition = vsMain->resolveInputParameter(Parameter::SPC_POSITION_OBJECT_SPACE);
+        mVSOutViewPos = vsMain->resolveOutputParameter(posContent);
+        mToView = psMain->resolveInputParameter(mVSOutViewPos);
 
         // Resolve camera position world space.
-        mCamPosWorldSpace = vsProgram->resolveAutoParameterInt(GpuProgramParameters::ACT_CAMERA_POSITION, 0);
-        mVSLocalDir = vsMain->resolveLocalParameter(Parameter::SPS_UNKNOWN, 0, "lNormalMapTempDir", GCT_FLOAT3);
-        mVSWorldPosition = vsMain->resolveLocalParameter(Parameter::SPS_POSITION, 0, Parameter::SPC_POSITION_WORLD_SPACE, GCT_FLOAT3);
+        mCamPosWorldSpace = vsProgram->resolveParameter(GpuProgramParameters::ACT_CAMERA_POSITION);
+        mVSLocalDir = vsMain->resolveLocalParameter("lNormalMapTempDir", GCT_FLOAT3);
+        mVSWorldPosition = vsMain->resolveLocalParameter(Parameter::SPC_POSITION_WORLD_SPACE);
         // Resolve world matrix.                
-        mWorldMatrix = vsProgram->resolveAutoParameterInt(GpuProgramParameters::ACT_WORLD_MATRIX, 0);
+        mWorldMatrix = vsProgram->resolveParameter(GpuProgramParameters::ACT_WORLD_MATRIX);
 
         // Resolve inverse world rotation matrix.
-        mWorldInvRotMatrix = vsProgram->resolveParameter(GCT_MATRIX_4X4, -1, (uint16)GPV_PER_OBJECT, "inv_world_rotation_matrix");
-
-        hasError |= !(mPSSpecular.get()) || !(mPSTempSpecularColour.get()) || !(mVSInPosition.get()) || !(mPSInView.get()) || !(mCamPosWorldSpace.get()) || 
-            !(mVSLocalDir.get()) || !(mVSWorldPosition.get()) || !(mWorldMatrix.get()) || !(mWorldInvRotMatrix.get());
+        mWorldInvRotMatrix = vsProgram->resolveParameter(GCT_MATRIX_3X3, -1, (uint16)GPV_PER_OBJECT, "inv_world_rotation_matrix");
     }
 
-    hasError |= !(mNormalMapSampler.get()) || !(mDerivedSceneColour.get()) || !(mSurfaceShininess.get()) || !(mVSInNormal.get()) || 
-        !(mVSInTexcoord.get()) || !(mVSOutTexcoord.get()) || !(mPSInTexcoord.get()) || !(mPSDiffuse.get()) || !(mPSOutDiffuse.get()) ||
-        !(mPSTempDiffuseColour.get());
-
-    if (hasError)
-    {
-        OGRE_EXCEPT( Exception::ERR_INTERNAL_ERROR, 
-                "Not all parameters could be constructed for the sub-render state.",
-                "NormalMapLighting::resolveGlobalParameters" );
-    }
     return true;
 }
 
 //-----------------------------------------------------------------------
 bool NormalMapLighting::resolvePerLightParameters(ProgramSet* programSet)
 {
-    Program* vsProgram = programSet->getCpuVertexProgram();
-    Program* psProgram = programSet->getCpuFragmentProgram();
+    Program* vsProgram = programSet->getCpuProgram(GPT_VERTEX_PROGRAM);
+    Program* psProgram = programSet->getCpuProgram(GPT_FRAGMENT_PROGRAM);
     Function* vsMain = vsProgram->getEntryPointFunction();
     Function* psMain = psProgram->getEntryPointFunction();
 
-    bool hasError = false;
+    // at most 8 lights are supported
+    if(mLightParamsList.size() > 8)
+        mLightParamsList.resize(8);
+
+    bool needViewPos = mNormalMapSpace == NMS_PARALLAX;
+
+    auto lightDirContent = mNormalMapSpace & NMS_TANGENT ? Parameter::SPC_LIGHTDIRECTION_TANGENT_SPACE0
+                                                          : Parameter::SPC_LIGHTDIRECTION_OBJECT_SPACE0;
+    auto lightPosContent = mNormalMapSpace & NMS_TANGENT ? Parameter::SPC_POSTOLIGHT_TANGENT_SPACE0
+                                                          : Parameter::SPC_POSITION_OBJECT_SPACE;
+
     // Resolve per light parameters.
     for (unsigned int i=0; i < mLightParamsList.size(); ++i)
     {       
@@ -438,213 +255,93 @@ bool NormalMapLighting::resolvePerLightParameters(ProgramSet* programSet)
         {
         case Light::LT_DIRECTIONAL:
             mLightParamsList[i].mDirection = vsProgram->resolveParameter(GCT_FLOAT4, -1, (uint16)GPV_LIGHTS|GPV_PER_OBJECT, "light_direction_obj_space");
-
-            if (mNormalMapSpace == NMS_TANGENT)
-            {
-                mLightParamsList[i].mVSOutDirection = vsMain->resolveOutputParameter(Parameter::SPS_TEXTURE_COORDINATES, -1,
-                    Parameter::Content(Parameter::SPC_LIGHTDIRECTION_TANGENT_SPACE0 + i),
-                    GCT_FLOAT3);
-            }
-            else if (mNormalMapSpace == NMS_OBJECT)
-            {
-                mLightParamsList[i].mVSOutDirection = vsMain->resolveOutputParameter(Parameter::SPS_TEXTURE_COORDINATES, -1,
-                    Parameter::Content(Parameter::SPC_LIGHTDIRECTION_OBJECT_SPACE0 + i),
-                    GCT_FLOAT3);
-            }
-
-            mLightParamsList[i].mPSInDirection = psMain->resolveInputParameter(Parameter::SPS_TEXTURE_COORDINATES, 
-                mLightParamsList[i].mVSOutDirection->getIndex(), 
-                mLightParamsList[i].mVSOutDirection->getContent(), 
-                mLightParamsList[i].mVSOutDirection->getType());
-
-            hasError = !(mLightParamsList[i].mDirection.get()) || !(mLightParamsList[i].mVSOutDirection.get()) || !(mLightParamsList[i].mPSInDirection.get());
+            mLightParamsList[i].mVSOutDirection =
+                vsMain->resolveOutputParameter(Parameter::Content(lightDirContent + i));
+            mLightParamsList[i].mPSInDirection = psMain->resolveInputParameter(mLightParamsList[i].mVSOutDirection);
             break;
 
-        case Light::LT_POINT:       
-            mVSInPosition = vsMain->resolveInputParameter(Parameter::SPS_POSITION, 0, Parameter::SPC_POSITION_OBJECT_SPACE, GCT_FLOAT4);
+        case Light::LT_POINT:
+            mLightParamsList[i].mPosition = vsProgram->resolveParameter(GpuProgramParameters::ACT_LIGHT_POSITION, i);
+            mLightParamsList[i].mVSOutToLightDir =
+                vsMain->resolveOutputParameter(Parameter::Content(lightPosContent + i), GCT_FLOAT3);
+            mLightParamsList[i].mToLight = psMain->resolveInputParameter(mLightParamsList[i].mVSOutToLightDir);
 
-            mLightParamsList[i].mPosition = vsProgram->resolveParameter(GCT_FLOAT4, -1, (uint16)GPV_LIGHTS|GPV_PER_OBJECT, "light_position_world_space");
+            mLightParamsList[i].mAttenuatParams = psProgram->resolveParameter(GpuProgramParameters::ACT_LIGHT_ATTENUATION, i);
 
-            if (mNormalMapSpace == NMS_TANGENT)
-            {
-                mLightParamsList[i].mVSOutToLightDir = vsMain->resolveOutputParameter(Parameter::SPS_TEXTURE_COORDINATES, -1, 
-                    Parameter::Content(Parameter::SPC_POSTOLIGHT_TANGENT_SPACE0 + i),
-                    GCT_FLOAT3);
-            }
-            else if (mNormalMapSpace == NMS_OBJECT)
-            {
-                mLightParamsList[i].mVSOutToLightDir = vsMain->resolveOutputParameter(Parameter::SPS_TEXTURE_COORDINATES, -1, 
-                    Parameter::Content(Parameter::SPC_POSTOLIGHT_OBJECT_SPACE0 + i),
-                    GCT_FLOAT3);
-            }
-            
-            mLightParamsList[i].mPSInToLightDir = psMain->resolveInputParameter(Parameter::SPS_TEXTURE_COORDINATES, 
-                mLightParamsList[i].mVSOutToLightDir->getIndex(), 
-                mLightParamsList[i].mVSOutToLightDir->getContent(), 
-                mLightParamsList[i].mVSOutToLightDir->getType());
-
-            mLightParamsList[i].mAttenuatParams = psProgram->resolveParameter(GCT_FLOAT4, -1, (uint16)GPV_LIGHTS, "light_attenuation");
-
-            // Resolve local dir.
-            if (mVSLocalDir.get() == NULL)
-            {
-                mVSLocalDir = vsMain->resolveLocalParameter(Parameter::SPS_UNKNOWN, 0, "lNormalMapTempDir", GCT_FLOAT3);
-            }   
-
-            // Resolve world position.
-            if (mVSWorldPosition.get() == NULL)
-            {
-                mVSWorldPosition = vsMain->resolveLocalParameter(Parameter::SPS_POSITION, 0, Parameter::SPC_POSITION_WORLD_SPACE, GCT_FLOAT3);
-            }   
-
-            // Resolve world matrix.
-            if (mWorldMatrix.get() == NULL)
-            {               
-                mWorldMatrix = vsProgram->resolveAutoParameterInt(GpuProgramParameters::ACT_WORLD_MATRIX, 0);
-            }
-
-            // Resolve inverse world rotation matrix.
-            if (mWorldInvRotMatrix.get() == NULL)
-            {               
-                mWorldInvRotMatrix = vsProgram->resolveParameter(GCT_MATRIX_4X4, -1, (uint16)GPV_PER_OBJECT, "inv_world_rotation_matrix");
-            }       
-
-            hasError |= !(mVSInPosition.get()) || !(mLightParamsList[i].mPosition.get()) || !(mLightParamsList[i].mVSOutToLightDir.get()) ||
-                 !(mLightParamsList[i].mPSInToLightDir.get()) || !(mLightParamsList[i].mAttenuatParams.get()) || !(mVSLocalDir.get()) ||
-                 !(mVSWorldPosition.get()) || !(mWorldMatrix.get()) || !(mWorldInvRotMatrix.get());
-            
+            needViewPos = true;
             break;
 
-        case Light::LT_SPOTLIGHT:       
-            mVSInPosition = vsMain->resolveInputParameter(Parameter::SPS_POSITION, 0, Parameter::SPC_POSITION_OBJECT_SPACE, GCT_FLOAT4);
-            mLightParamsList[i].mPosition = vsProgram->resolveParameter(GCT_FLOAT4, -1, (uint16)GPV_LIGHTS|GPV_PER_OBJECT, "light_position_world_space");
-            
-            if (mNormalMapSpace == NMS_TANGENT)
-            {
-                mLightParamsList[i].mVSOutToLightDir = vsMain->resolveOutputParameter(Parameter::SPS_TEXTURE_COORDINATES, -1, 
-                    Parameter::Content(Parameter::SPC_POSTOLIGHT_TANGENT_SPACE0 + i),
-                    GCT_FLOAT3);
-            }
-            else if (mNormalMapSpace == NMS_OBJECT)
-            {
-                mLightParamsList[i].mVSOutToLightDir = vsMain->resolveOutputParameter(Parameter::SPS_TEXTURE_COORDINATES, -1, 
-                    Parameter::Content(Parameter::SPC_POSTOLIGHT_OBJECT_SPACE0 + i),
-                    GCT_FLOAT3);
-            }
-            
-            mLightParamsList[i].mPSInToLightDir = psMain->resolveInputParameter(Parameter::SPS_TEXTURE_COORDINATES, 
-                mLightParamsList[i].mVSOutToLightDir->getIndex(), 
-                mLightParamsList[i].mVSOutToLightDir->getContent(), 
-                mLightParamsList[i].mVSOutToLightDir->getType());
+        case Light::LT_SPOTLIGHT:
+
+            mLightParamsList[i].mPosition = vsProgram->resolveParameter(GpuProgramParameters::ACT_LIGHT_POSITION, i);
+            mLightParamsList[i].mVSOutToLightDir =
+                vsMain->resolveOutputParameter(Parameter::Content(lightPosContent + i), GCT_FLOAT3);
+            mLightParamsList[i].mToLight = psMain->resolveInputParameter(mLightParamsList[i].mVSOutToLightDir);
 
             mLightParamsList[i].mDirection = vsProgram->resolveParameter(GCT_FLOAT4, -1, (uint16)GPV_LIGHTS|GPV_PER_OBJECT, "light_direction_obj_space");
+            mLightParamsList[i].mVSOutDirection =
+                vsMain->resolveOutputParameter(Parameter::Content(lightDirContent + i));
+            mLightParamsList[i].mPSInDirection = psMain->resolveInputParameter(mLightParamsList[i].mVSOutDirection);
 
-            if (mNormalMapSpace == NMS_TANGENT)
-            {
-                mLightParamsList[i].mVSOutDirection = vsMain->resolveOutputParameter(Parameter::SPS_TEXTURE_COORDINATES, -1,
-                    Parameter::Content(Parameter::SPC_LIGHTDIRECTION_TANGENT_SPACE0 + i),
-                    GCT_FLOAT3);
-            }
-            else if (mNormalMapSpace == NMS_OBJECT)
-            {
-                mLightParamsList[i].mVSOutDirection = vsMain->resolveOutputParameter(Parameter::SPS_TEXTURE_COORDINATES, -1,
-                    Parameter::Content(Parameter::SPC_LIGHTDIRECTION_OBJECT_SPACE0 + i),
-                    GCT_FLOAT3);
-            }
-                        
-            mLightParamsList[i].mPSInDirection = psMain->resolveInputParameter(Parameter::SPS_TEXTURE_COORDINATES, 
-                mLightParamsList[i].mVSOutDirection->getIndex(), 
-                mLightParamsList[i].mVSOutDirection->getContent(), 
-                mLightParamsList[i].mVSOutDirection->getType());
+            mLightParamsList[i].mAttenuatParams = psProgram->resolveParameter(GpuProgramParameters::ACT_LIGHT_ATTENUATION, i);
+            mLightParamsList[i].mSpotParams = psProgram->resolveParameter(GpuProgramParameters::ACT_SPOTLIGHT_PARAMS, i);
 
-            mLightParamsList[i].mAttenuatParams = psProgram->resolveParameter(GCT_FLOAT4, -1, (uint16)GPV_LIGHTS, "light_attenuation");
-
-            mLightParamsList[i].mSpotParams = psProgram->resolveParameter(GCT_FLOAT3, -1, (uint16)GPV_LIGHTS, "spotlight_params");
-            
-            // Resolve local dir.
-            if (mVSLocalDir.get() == NULL)
-            {
-                mVSLocalDir = vsMain->resolveLocalParameter(Parameter::SPS_UNKNOWN, 0, "lNormalMapTempDir", GCT_FLOAT3);
-            }   
-
-            // Resolve world position.
-            if (mVSWorldPosition.get() == NULL)
-            {
-                mVSWorldPosition = vsMain->resolveLocalParameter(Parameter::SPS_POSITION, 0, Parameter::SPC_POSITION_WORLD_SPACE, GCT_FLOAT3);
-            }   
-
-            // Resolve world matrix.
-            if (mWorldMatrix.get() == NULL)
-            {               
-                mWorldMatrix = vsProgram->resolveAutoParameterInt(GpuProgramParameters::ACT_WORLD_MATRIX, 0);
-            }
-            
-            // Resolve inverse world rotation matrix.
-            if (mWorldInvRotMatrix.get() == NULL)
-            {               
-                mWorldInvRotMatrix = vsProgram->resolveParameter(GCT_MATRIX_4X4, -1, (uint16)GPV_PER_OBJECT, "inv_world_rotation_matrix");
-            }
-                  
-            hasError |= !(mVSInPosition.get()) || !(mLightParamsList[i].mPosition.get()) || !(mLightParamsList[i].mVSOutToLightDir.get()) || 
-                !(mLightParamsList[i].mPSInToLightDir.get()) || !(mLightParamsList[i].mDirection.get()) || !(mLightParamsList[i].mVSOutDirection.get()) || 
-                !(mLightParamsList[i].mPSInDirection.get()) || !(mLightParamsList[i].mAttenuatParams.get()) || !(mLightParamsList[i].mSpotParams.get()) ||
-                !(mVSLocalDir.get()) || !(mVSWorldPosition.get()) || !(mWorldMatrix.get()) || !(mWorldInvRotMatrix.get());
-                        
+            needViewPos = true;
             break;
         }
 
         // Resolve diffuse colour.
         if ((mTrackVertexColourType & TVC_DIFFUSE) == 0)
         {
-            mLightParamsList[i].mDiffuseColour = psProgram->resolveParameter(GCT_FLOAT4, -1, (uint16)GPV_LIGHTS, "derived_light_diffuse");
+            mLightParamsList[i].mDiffuseColour = psProgram->resolveParameter(GpuProgramParameters::ACT_DERIVED_LIGHT_DIFFUSE_COLOUR, i);
         }
         else
         {
-            mLightParamsList[i].mDiffuseColour = psProgram->resolveParameter(GCT_FLOAT4, -1, (uint16)GPV_LIGHTS, "light_diffuse");
+            mLightParamsList[i].mDiffuseColour = psProgram->resolveParameter(GpuProgramParameters::ACT_LIGHT_DIFFUSE_COLOUR_POWER_SCALED, i);
         }       
-
-        hasError |= !(mLightParamsList[i].mDiffuseColour.get());
             
         if (mSpecularEnable)
         {
             // Resolve specular colour.
             if ((mTrackVertexColourType & TVC_SPECULAR) == 0)
             {
-                mLightParamsList[i].mSpecularColour = psProgram->resolveParameter(GCT_FLOAT4, -1, (uint16)GPV_LIGHTS, "derived_light_specular");
+                mLightParamsList[i].mSpecularColour = psProgram->resolveParameter(GpuProgramParameters::ACT_DERIVED_LIGHT_SPECULAR_COLOUR, i);
             }
             else
             {
-                mLightParamsList[i].mSpecularColour = psProgram->resolveParameter(GCT_FLOAT4, -1, (uint16)GPV_LIGHTS, "light_specular");
+                mLightParamsList[i].mSpecularColour = psProgram->resolveParameter(GpuProgramParameters::ACT_LIGHT_SPECULAR_COLOUR_POWER_SCALED, i);
             }   
-            hasError |= !(mLightParamsList[i].mSpecularColour.get());
         }   
 
     }
 
-    
-    if (hasError)
+    if(needViewPos)
     {
-        OGRE_EXCEPT( Exception::ERR_INTERNAL_ERROR, 
-                "Not all parameters could be constructed for the sub-render state.",
-                "NormalMapLighting::resolvePerLightParameters" );
+        mVSInPosition = vsMain->resolveInputParameter(Parameter::SPC_POSITION_OBJECT_SPACE);
+        // Resolve local dir.
+        mVSLocalDir = vsMain->resolveLocalParameter("lNormalMapTempDir", GCT_FLOAT3);
+        mVSWorldPosition = vsMain->resolveLocalParameter(Parameter::SPC_POSITION_WORLD_SPACE);
+        mWorldMatrix = vsProgram->resolveParameter(GpuProgramParameters::ACT_WORLD_MATRIX);
+        // Resolve inverse world rotation matrix.
+        mWorldInvRotMatrix = vsProgram->resolveParameter(GCT_MATRIX_3X3, -1, (uint16)GPV_PER_OBJECT, "inv_world_rotation_matrix");
     }
+
     return true;
 }
 
 //-----------------------------------------------------------------------
 bool NormalMapLighting::resolveDependencies(ProgramSet* programSet)
 {
-    Program* vsProgram = programSet->getCpuVertexProgram();
-    Program* psProgram = programSet->getCpuFragmentProgram();
+    Program* vsProgram = programSet->getCpuProgram(GPT_VERTEX_PROGRAM);
+    Program* psProgram = programSet->getCpuProgram(GPT_FRAGMENT_PROGRAM);
 
+    vsProgram->addDependency(FFP_LIB_TRANSFORM);
     vsProgram->addDependency(FFP_LIB_TEXTURING);
+    vsProgram->addDependency(SGX_LIB_NORMALMAP);
+
     psProgram->addDependency(FFP_LIB_TEXTURING);
-
-    vsProgram->addDependency(FFP_LIB_COMMON);
-    vsProgram->addDependency(SGX_LIB_NORMALMAPLIGHTING);
-
-    psProgram->addDependency(FFP_LIB_COMMON);
-    psProgram->addDependency(SGX_LIB_NORMALMAPLIGHTING);
+    psProgram->addDependency(SGX_LIB_PERPIXELLIGHTING);
+    psProgram->addDependency(SGX_LIB_NORMALMAP);
 
     return true;
 }
@@ -652,154 +349,115 @@ bool NormalMapLighting::resolveDependencies(ProgramSet* programSet)
 //-----------------------------------------------------------------------
 bool NormalMapLighting::addFunctionInvocations(ProgramSet* programSet)
 {
-    Program* vsProgram = programSet->getCpuVertexProgram(); 
+    Program* vsProgram = programSet->getCpuProgram(GPT_VERTEX_PROGRAM); 
     Function* vsMain = vsProgram->getEntryPointFunction();  
-    Program* psProgram = programSet->getCpuFragmentProgram();
+    Program* psProgram = programSet->getCpuProgram(GPT_FRAGMENT_PROGRAM);
     Function* psMain = psProgram->getEntryPointFunction();  
 
-    int internalCounter = 0;
-
-
     // Add the global illumination functions.
-    if (false == addVSInvocation(vsMain, FFP_VS_LIGHTING, internalCounter))
-        return false;
+    addVSInvocation(vsMain->getStage(FFP_VS_LIGHTING));
 
+    auto stage = psMain->getStage(FFP_PS_COLOUR_BEGIN + 1);
 
-    internalCounter = 0;
+    if (!mLightParamsList.empty() && mNormalMapSpace == NMS_PARALLAX)
+    {
+        // TODO: user specificed scale and bias
+        stage.callFunction("SGX_Generate_Parallax_Texcoord", {In(mPSNormalMapSampler), In(mPSInTexcoord), In(mToView),
+                                                              In(Vector2(0.04, -0.02)), Out(mPSInTexcoord)});
 
-
-    // Add the normal fetch function invocation.
-    if (false == addPSNormalFetchInvocation(psMain, FFP_PS_COLOUR_BEGIN + 1, internalCounter))
-        return false;
-
-    
-    // Add the global illumination functions.
-    if (false == addPSGlobalIlluminationInvocation(psMain, FFP_PS_COLOUR_BEGIN + 1, internalCounter))
-        return false;
-
-
-    // Add per light functions.
-    for (unsigned int i=0; i < mLightParamsList.size(); ++i)
-    {       
-        if (false == addPSIlluminationInvocation(&mLightParamsList[i], psMain, FFP_PS_COLOUR_BEGIN + 1, internalCounter))
-            return false;
+        // overwrite texcoord0 unconditionally, only one texcoord set is supported with parallax mapping
+        // we are before FFP_PS_TEXTURING, so the new value will be used
+        auto texcoord0 = psMain->resolveInputParameter(Parameter::SPC_TEXTURE_COORDINATE0, GCT_FLOAT2);
+        stage.assign(mPSInTexcoord, texcoord0);
     }
 
-    // Assign back temporary variables to the ps diffuse and specular components.
-    if (false == addPSFinalAssignmentInvocation(psMain, FFP_PS_COLOUR_BEGIN + 1, internalCounter))
-        return false;
+    // Add the normal fetch function invocation
+    if(!mLightParamsList.empty())
+    {
+        stage.callFunction(SGX_FUNC_FETCHNORMAL, mPSNormalMapSampler, mPSInTexcoord, mViewNormal);
+    }
 
+    // Add the global illumination functions.
+    addPSGlobalIlluminationInvocation(stage);
+
+    // Add per light functions.
+    for (const auto& lp : mLightParamsList)
+    {
+        addIlluminationInvocation(&lp, stage);
+    }
+
+    // Assign back temporary variables
+    stage.assign(mOutDiffuse, mInDiffuse);
 
     return true;
 }
 
 //-----------------------------------------------------------------------
-bool NormalMapLighting::addVSInvocation(Function* vsMain, const int groupOrder, int& internalCounter)
+void NormalMapLighting::addVSInvocation(const FunctionStageRef& stage)
 {
-    FunctionInvocation* curFuncInvocation = NULL;
-
     // Construct TNB matrix.
-    if (mNormalMapSpace == NMS_TANGENT)
+    if (mNormalMapSpace & NMS_TANGENT)
     {
-        curFuncInvocation = OGRE_NEW FunctionInvocation(SGX_FUNC_CONSTRUCT_TBNMATRIX, groupOrder, internalCounter++); 
-        curFuncInvocation->pushOperand(mVSInNormal, Operand::OPS_IN);
-        curFuncInvocation->pushOperand(mVSInTangent, Operand::OPS_IN);
-        curFuncInvocation->pushOperand(mVSTBNMatrix, Operand::OPS_OUT); 
-        vsMain->addAtomInstance(curFuncInvocation);
+        stage.callFunction(SGX_FUNC_CONSTRUCT_TBNMATRIX, mVSInNormal, mVSInTangent, mVSTBNMatrix);
     }
     
-
     // Output texture coordinates.
-    curFuncInvocation = OGRE_NEW FunctionInvocation(FFP_FUNC_ASSIGN, groupOrder, internalCounter++); 
-    curFuncInvocation->pushOperand(mVSInTexcoord, Operand::OPS_IN);
-    curFuncInvocation->pushOperand(mVSOutTexcoord, Operand::OPS_OUT);   
-    vsMain->addAtomInstance(curFuncInvocation);
+    stage.assign(mVSInTexcoord, mVSOutTexcoord);
 
     // Compute world space position.
     if (mVSWorldPosition.get() != NULL)
     {
-        curFuncInvocation = OGRE_NEW FunctionInvocation(SGX_FUNC_TRANSFORMPOSITION, groupOrder, internalCounter++); 
-        curFuncInvocation->pushOperand(mWorldMatrix, Operand::OPS_IN);
-        curFuncInvocation->pushOperand(mVSInPosition, Operand::OPS_IN); 
-        curFuncInvocation->pushOperand(mVSWorldPosition, Operand::OPS_OUT); 
-        vsMain->addAtomInstance(curFuncInvocation);
+        stage.callFunction(FFP_FUNC_TRANSFORM, mWorldMatrix, mVSInPosition, mVSWorldPosition);
     }
     
 
+
     // Compute view vector.
-    if (mVSInPosition.get() != NULL && 
-        mVSOutView.get() != NULL)
-    {   
+    if (mVSInPosition && mVSOutViewPos)
+    {
         // View vector in world space.
-        curFuncInvocation = OGRE_NEW FunctionInvocation(FFP_FUNC_SUBTRACT, groupOrder, internalCounter++); 
-        curFuncInvocation->pushOperand(mCamPosWorldSpace, Operand::OPS_IN, Operand::OPM_XYZ);
-        curFuncInvocation->pushOperand(mVSWorldPosition, Operand::OPS_IN, Operand::OPM_XYZ);
-        curFuncInvocation->pushOperand(mVSLocalDir, Operand::OPS_OUT);  
-        vsMain->addAtomInstance(curFuncInvocation);
+        stage.sub(In(mCamPosWorldSpace).xyz(), In(mVSWorldPosition).xyz(), mVSLocalDir);
 
         // Transform to object space.
-        curFuncInvocation = OGRE_NEW FunctionInvocation(SGX_FUNC_TRANSFORMNORMAL, groupOrder, internalCounter++); 
-        curFuncInvocation->pushOperand(mWorldInvRotMatrix, Operand::OPS_IN);
-        curFuncInvocation->pushOperand(mVSLocalDir, Operand::OPS_IN);   
-        curFuncInvocation->pushOperand(mVSLocalDir, Operand::OPS_OUT);  
-        vsMain->addAtomInstance(curFuncInvocation);
+        stage.callFunction(FFP_FUNC_TRANSFORM, mWorldInvRotMatrix, mVSLocalDir, mVSLocalDir);
 
         // Transform to tangent space.
-        if (mNormalMapSpace == NMS_TANGENT)
+        if (mNormalMapSpace & NMS_TANGENT)
         {
-            curFuncInvocation = OGRE_NEW FunctionInvocation(SGX_FUNC_TRANSFORMNORMAL, groupOrder, internalCounter++); 
-            curFuncInvocation->pushOperand(mVSTBNMatrix, Operand::OPS_IN);
-            curFuncInvocation->pushOperand(mVSLocalDir, Operand::OPS_IN);
-            curFuncInvocation->pushOperand(mVSOutView, Operand::OPS_OUT);   
-            vsMain->addAtomInstance(curFuncInvocation);
+            stage.callFunction(FFP_FUNC_TRANSFORM, mVSTBNMatrix, mVSLocalDir, mVSOutViewPos);
         }
 
         // Output object space.
-        else if (mNormalMapSpace == NMS_OBJECT)
+        else if (mNormalMapSpace & NMS_OBJECT)
         {
-            curFuncInvocation = OGRE_NEW FunctionInvocation(FFP_FUNC_ASSIGN, groupOrder, internalCounter++); 
-            curFuncInvocation->pushOperand(mVSLocalDir, Operand::OPS_IN);
-            curFuncInvocation->pushOperand(mVSOutView, Operand::OPS_OUT);                   
-            vsMain->addAtomInstance(curFuncInvocation);
+            stage.assign(mVSLocalDir, mVSOutViewPos);
         }
     }
 
     // Add per light functions.
-    for (unsigned int i=0; i < mLightParamsList.size(); ++i)
-    {       
-        if (false == addVSIlluminationInvocation(&mLightParamsList[i], vsMain, groupOrder, internalCounter))
-            return false;
+    for (const auto& lp : mLightParamsList)
+    {
+        addVSIlluminationInvocation(&lp, stage);
     }
-
-
-    return true;
 }
 
 //-----------------------------------------------------------------------
-bool NormalMapLighting::addVSIlluminationInvocation(LightParams* curLightParams, Function* vsMain, const int groupOrder, int& internalCounter)
+void NormalMapLighting::addVSIlluminationInvocation(const LightParams* curLightParams, const FunctionStageRef& stage)
 {
-    FunctionInvocation* curFuncInvocation = NULL;
-
     // Compute light direction in texture space.
     if (curLightParams->mDirection.get() != NULL &&
         curLightParams->mVSOutDirection.get() != NULL)
     {
         // Transform to texture space.
-        if (mNormalMapSpace == NMS_TANGENT)
+        if (mNormalMapSpace & NMS_TANGENT)
         {
-            curFuncInvocation = OGRE_NEW FunctionInvocation(SGX_FUNC_TRANSFORMNORMAL, groupOrder, internalCounter++); 
-            curFuncInvocation->pushOperand(mVSTBNMatrix, Operand::OPS_IN);
-            curFuncInvocation->pushOperand(curLightParams->mDirection, Operand::OPS_IN, Operand::OPM_XYZ);
-            curFuncInvocation->pushOperand(curLightParams->mVSOutDirection, Operand::OPS_OUT);  
-            vsMain->addAtomInstance(curFuncInvocation);
+            stage.callFunction(FFP_FUNC_TRANSFORM, mVSTBNMatrix, In(curLightParams->mDirection).xyz(),
+                               curLightParams->mVSOutDirection);
         }
         // Output object space.
-        else if (mNormalMapSpace == NMS_OBJECT)
+        else if (mNormalMapSpace & NMS_OBJECT)
         {
-            curFuncInvocation = OGRE_NEW FunctionInvocation(FFP_FUNC_ASSIGN, groupOrder, internalCounter++); 
-            curFuncInvocation->pushOperand(curLightParams->mDirection, Operand::OPS_IN, Operand::OPM_XYZ);
-            curFuncInvocation->pushOperand(curLightParams->mVSOutDirection, Operand::OPS_OUT);                  
-            vsMain->addAtomInstance(curFuncInvocation);
+            stage.assign(In(curLightParams->mDirection).xyz(), curLightParams->mVSOutDirection);
         }
     }
     
@@ -808,413 +466,57 @@ bool NormalMapLighting::addVSIlluminationInvocation(LightParams* curLightParams,
         curLightParams->mVSOutToLightDir.get() != NULL)
     {
         // Compute light vector.
-        curFuncInvocation = OGRE_NEW FunctionInvocation(FFP_FUNC_SUBTRACT, groupOrder, internalCounter++); 
-        curFuncInvocation->pushOperand(curLightParams->mPosition, Operand::OPS_IN, Operand::OPM_XYZ);
-        curFuncInvocation->pushOperand(mVSWorldPosition, Operand::OPS_IN);  
-        curFuncInvocation->pushOperand(mVSLocalDir, Operand::OPS_OUT);  
-        vsMain->addAtomInstance(curFuncInvocation);
+        stage.sub(In(curLightParams->mPosition).xyz(), mVSWorldPosition, mVSLocalDir);
 
         // Transform to object space.
-        curFuncInvocation = OGRE_NEW FunctionInvocation(SGX_FUNC_TRANSFORMNORMAL, groupOrder, internalCounter++); 
-        curFuncInvocation->pushOperand(mWorldInvRotMatrix, Operand::OPS_IN);
-        curFuncInvocation->pushOperand(mVSLocalDir, Operand::OPS_IN);   
-        curFuncInvocation->pushOperand(mVSLocalDir, Operand::OPS_OUT);  
-        vsMain->addAtomInstance(curFuncInvocation);
+        stage.callFunction(FFP_FUNC_TRANSFORM, mWorldInvRotMatrix, mVSLocalDir, mVSLocalDir);
 
         // Transform to tangent space.      
-        if (mNormalMapSpace == NMS_TANGENT)
+        if (mNormalMapSpace & NMS_TANGENT)
         {
-            curFuncInvocation = OGRE_NEW FunctionInvocation(SGX_FUNC_TRANSFORMNORMAL, groupOrder, internalCounter++); 
-            curFuncInvocation->pushOperand(mVSTBNMatrix, Operand::OPS_IN);
-            curFuncInvocation->pushOperand(mVSLocalDir, Operand::OPS_IN);
-            curFuncInvocation->pushOperand(curLightParams->mVSOutToLightDir, Operand::OPS_OUT); 
-            vsMain->addAtomInstance(curFuncInvocation);
+            stage.callFunction(FFP_FUNC_TRANSFORM, mVSTBNMatrix, mVSLocalDir,
+                               curLightParams->mVSOutToLightDir);
         }
-        
+
         // Output object space.
-        else if (mNormalMapSpace == NMS_OBJECT)
+        else if (mNormalMapSpace & NMS_OBJECT)
         {
-            curFuncInvocation = OGRE_NEW FunctionInvocation(FFP_FUNC_ASSIGN, groupOrder, internalCounter++); 
-            curFuncInvocation->pushOperand(mVSLocalDir, Operand::OPS_IN);
-            curFuncInvocation->pushOperand(curLightParams->mVSOutToLightDir, Operand::OPS_OUT);                 
-            vsMain->addAtomInstance(curFuncInvocation);
+            stage.assign(mVSLocalDir, curLightParams->mVSOutToLightDir);
         }
     }
-
-
-    return true;
 }
-
-//-----------------------------------------------------------------------
-bool NormalMapLighting::addPSNormalFetchInvocation(Function* psMain, const int groupOrder, int& internalCounter)
-{
-    FunctionInvocation* curFuncInvocation = NULL;   
-
-	bool isHLSL = Ogre::RTShader::ShaderGenerator::getSingleton().getTargetLanguage() == "hlsl";
-
-	if (isHLSL)
-		FFPTexturing::AddTextureSampleWrapperInvocation(mNormalMapSampler, mNormalMapSamplerState, GCT_SAMPLER2D, psMain, groupOrder, internalCounter);
-
-    curFuncInvocation = OGRE_NEW FunctionInvocation(SGX_FUNC_FETCHNORMAL, groupOrder, internalCounter++); 
-
-	if (isHLSL)
-		curFuncInvocation->pushOperand(FFPTexturing::GetSamplerWrapperParam(mNormalMapSampler, psMain), Operand::OPS_IN);
-	else
-		curFuncInvocation->pushOperand(mNormalMapSampler, Operand::OPS_IN);
-
-    curFuncInvocation->pushOperand(mPSInTexcoord, Operand::OPS_IN);
-	curFuncInvocation->pushOperand(mPSNormal, Operand::OPS_OUT);	
-    psMain->addAtomInstance(curFuncInvocation);     
-
-    return true;
-}
-
-//-----------------------------------------------------------------------
-bool NormalMapLighting::addPSGlobalIlluminationInvocation(Function* psMain, const int groupOrder, int& internalCounter)
-{
-    FunctionInvocation* curFuncInvocation = NULL;   
-
-    if ((mTrackVertexColourType & TVC_AMBIENT) == 0 && 
-        (mTrackVertexColourType & TVC_EMISSIVE) == 0)
-    {
-        curFuncInvocation = OGRE_NEW FunctionInvocation(FFP_FUNC_ASSIGN, groupOrder, internalCounter++); 
-        curFuncInvocation->pushOperand(mDerivedSceneColour, Operand::OPS_IN);
-        curFuncInvocation->pushOperand(mPSTempDiffuseColour, Operand::OPS_OUT); 
-        psMain->addAtomInstance(curFuncInvocation);     
-    }
-    else
-    {
-        if (mTrackVertexColourType & TVC_AMBIENT)
-        {
-            curFuncInvocation = OGRE_NEW FunctionInvocation(FFP_FUNC_MODULATE, groupOrder, internalCounter++); 
-            curFuncInvocation->pushOperand(mLightAmbientColour, Operand::OPS_IN);
-            curFuncInvocation->pushOperand(mPSDiffuse, Operand::OPS_IN);            
-            curFuncInvocation->pushOperand(mPSTempDiffuseColour, Operand::OPS_OUT); 
-            psMain->addAtomInstance(curFuncInvocation);
-        }
-        else
-        {
-            curFuncInvocation = OGRE_NEW FunctionInvocation(FFP_FUNC_ASSIGN, groupOrder, internalCounter++); 
-            curFuncInvocation->pushOperand(mDerivedAmbientLightColour, Operand::OPS_IN, Operand::OPM_XYZ);  
-            curFuncInvocation->pushOperand(mPSTempDiffuseColour, Operand::OPS_OUT, Operand::OPM_XYZ);   
-            psMain->addAtomInstance(curFuncInvocation);
-        }
-
-        if (mTrackVertexColourType & TVC_EMISSIVE)
-        {
-            curFuncInvocation = OGRE_NEW FunctionInvocation(FFP_FUNC_ADD, groupOrder, internalCounter++); 
-            curFuncInvocation->pushOperand(mPSDiffuse, Operand::OPS_IN);
-            curFuncInvocation->pushOperand(mPSTempDiffuseColour, Operand::OPS_IN);
-            curFuncInvocation->pushOperand(mPSTempDiffuseColour, Operand::OPS_OUT); 
-            psMain->addAtomInstance(curFuncInvocation);
-        }
-        else
-        {
-            curFuncInvocation = OGRE_NEW FunctionInvocation(FFP_FUNC_ADD, groupOrder, internalCounter++); 
-            curFuncInvocation->pushOperand(mSurfaceEmissiveColour, Operand::OPS_IN);
-            curFuncInvocation->pushOperand(mPSTempDiffuseColour, Operand::OPS_IN);
-            curFuncInvocation->pushOperand(mPSTempDiffuseColour, Operand::OPS_OUT); 
-            psMain->addAtomInstance(curFuncInvocation);
-        }       
-    }
-
-    if (mSpecularEnable)
-    {
-        curFuncInvocation = OGRE_NEW FunctionInvocation(FFP_FUNC_ASSIGN, groupOrder, internalCounter++); 
-        curFuncInvocation->pushOperand(mPSSpecular, Operand::OPS_IN);
-        curFuncInvocation->pushOperand(mPSTempSpecularColour, Operand::OPS_OUT);    
-        psMain->addAtomInstance(curFuncInvocation); 
-    }
-    
-    return true;
-}
-
-//-----------------------------------------------------------------------
-bool NormalMapLighting::addPSIlluminationInvocation(LightParams* curLightParams, Function* psMain, const int groupOrder, int& internalCounter)
-{   
-    FunctionInvocation* curFuncInvocation = NULL;   
-
-    // Merge diffuse colour with vertex colour if need to.
-    if (mTrackVertexColourType & TVC_DIFFUSE)           
-    {
-        curFuncInvocation = OGRE_NEW FunctionInvocation(FFP_FUNC_MODULATE, groupOrder, internalCounter++); 
-        curFuncInvocation->pushOperand(mPSDiffuse, Operand::OPS_IN, Operand::OPM_XYZ);  
-        curFuncInvocation->pushOperand(curLightParams->mDiffuseColour, Operand::OPS_IN, Operand::OPM_XYZ);
-        curFuncInvocation->pushOperand(curLightParams->mDiffuseColour, Operand::OPS_OUT, Operand::OPM_XYZ);
-        psMain->addAtomInstance(curFuncInvocation);
-    }
-
-    // Merge specular colour with vertex colour if need to.
-    if (mSpecularEnable && mTrackVertexColourType & TVC_SPECULAR)
-    {                           
-        curFuncInvocation = OGRE_NEW FunctionInvocation(FFP_FUNC_MODULATE, groupOrder, internalCounter++); 
-        curFuncInvocation->pushOperand(mPSDiffuse, Operand::OPS_IN, Operand::OPM_XYZ);  
-        curFuncInvocation->pushOperand(curLightParams->mSpecularColour, Operand::OPS_IN, Operand::OPM_XYZ);
-        curFuncInvocation->pushOperand(curLightParams->mSpecularColour, Operand::OPS_OUT, Operand::OPM_XYZ);
-        psMain->addAtomInstance(curFuncInvocation);
-    }
-
-    switch (curLightParams->mType)
-    {
-
-    case Light::LT_DIRECTIONAL:         
-        if (mSpecularEnable)
-        {               
-            curFuncInvocation = OGRE_NEW FunctionInvocation(SGX_FUNC_LIGHT_DIRECTIONAL_DIFFUSESPECULAR, groupOrder, internalCounter++); 
-            curFuncInvocation->pushOperand(mPSNormal, Operand::OPS_IN);
-            curFuncInvocation->pushOperand(mPSInView, Operand::OPS_IN);         
-            curFuncInvocation->pushOperand(curLightParams->mPSInDirection, Operand::OPS_IN, Operand::OPM_XYZ);
-            curFuncInvocation->pushOperand(curLightParams->mDiffuseColour, Operand::OPS_IN, Operand::OPM_XYZ);          
-            curFuncInvocation->pushOperand(curLightParams->mSpecularColour, Operand::OPS_IN, Operand::OPM_XYZ);         
-            curFuncInvocation->pushOperand(mSurfaceShininess, Operand::OPS_IN);
-            curFuncInvocation->pushOperand(mPSTempDiffuseColour, Operand::OPS_IN, Operand::OPM_XYZ);    
-            curFuncInvocation->pushOperand(mPSTempSpecularColour, Operand::OPS_IN, Operand::OPM_XYZ);
-            curFuncInvocation->pushOperand(mPSTempDiffuseColour, Operand::OPS_OUT, Operand::OPM_XYZ);   
-            curFuncInvocation->pushOperand(mPSTempSpecularColour, Operand::OPS_OUT, Operand::OPM_XYZ);  
-            psMain->addAtomInstance(curFuncInvocation);
-        }
-
-        else
-        {
-            curFuncInvocation = OGRE_NEW FunctionInvocation(SGX_FUNC_LIGHT_DIRECTIONAL_DIFFUSE, groupOrder, internalCounter++);             
-            curFuncInvocation->pushOperand(mPSNormal, Operand::OPS_IN);
-            curFuncInvocation->pushOperand(curLightParams->mPSInDirection, Operand::OPS_IN, Operand::OPM_XYZ);
-            curFuncInvocation->pushOperand(curLightParams->mDiffuseColour, Operand::OPS_IN, Operand::OPM_XYZ);                  
-            curFuncInvocation->pushOperand(mPSTempDiffuseColour, Operand::OPS_IN, Operand::OPM_XYZ);    
-            curFuncInvocation->pushOperand(mPSTempDiffuseColour, Operand::OPS_OUT, Operand::OPM_XYZ);   
-            psMain->addAtomInstance(curFuncInvocation); 
-        }   
-        break;
-
-    case Light::LT_POINT:   
-        if (mSpecularEnable)
-        {
-            curFuncInvocation = OGRE_NEW FunctionInvocation(SGX_FUNC_LIGHT_POINT_DIFFUSESPECULAR, groupOrder, internalCounter++);           
-            curFuncInvocation->pushOperand(mPSNormal, Operand::OPS_IN);         
-            curFuncInvocation->pushOperand(mPSInView, Operand::OPS_IN); 
-            curFuncInvocation->pushOperand(curLightParams->mPSInToLightDir, Operand::OPS_IN, Operand::OPM_XYZ);
-            curFuncInvocation->pushOperand(curLightParams->mAttenuatParams, Operand::OPS_IN);
-            curFuncInvocation->pushOperand(curLightParams->mDiffuseColour, Operand::OPS_IN, Operand::OPM_XYZ);
-            curFuncInvocation->pushOperand(curLightParams->mSpecularColour, Operand::OPS_IN, Operand::OPM_XYZ);         
-            curFuncInvocation->pushOperand(mSurfaceShininess, Operand::OPS_IN);
-            curFuncInvocation->pushOperand(mPSTempDiffuseColour, Operand::OPS_IN, Operand::OPM_XYZ);    
-            curFuncInvocation->pushOperand(mPSTempSpecularColour, Operand::OPS_IN, Operand::OPM_XYZ);
-            curFuncInvocation->pushOperand(mPSTempDiffuseColour, Operand::OPS_OUT, Operand::OPM_XYZ);   
-            curFuncInvocation->pushOperand(mPSTempSpecularColour, Operand::OPS_OUT, Operand::OPM_XYZ);  
-            psMain->addAtomInstance(curFuncInvocation);     
-        }
-        else
-        {
-            curFuncInvocation = OGRE_NEW FunctionInvocation(SGX_FUNC_LIGHT_POINT_DIFFUSE, groupOrder, internalCounter++);           
-            curFuncInvocation->pushOperand(mPSNormal, Operand::OPS_IN);                     
-            curFuncInvocation->pushOperand(curLightParams->mPSInToLightDir, Operand::OPS_IN, Operand::OPM_XYZ);
-            curFuncInvocation->pushOperand(curLightParams->mAttenuatParams, Operand::OPS_IN);
-            curFuncInvocation->pushOperand(curLightParams->mDiffuseColour, Operand::OPS_IN, Operand::OPM_XYZ);                  
-            curFuncInvocation->pushOperand(mPSTempDiffuseColour, Operand::OPS_IN, Operand::OPM_XYZ);    
-            curFuncInvocation->pushOperand(mPSTempDiffuseColour, Operand::OPS_OUT, Operand::OPM_XYZ);   
-            psMain->addAtomInstance(curFuncInvocation); 
-        }
-
-        break;
-
-    case Light::LT_SPOTLIGHT:
-        if (mSpecularEnable)
-        {
-            curFuncInvocation = OGRE_NEW FunctionInvocation(SGX_FUNC_LIGHT_SPOT_DIFFUSESPECULAR, groupOrder, internalCounter++);            
-            curFuncInvocation->pushOperand(mPSNormal, Operand::OPS_IN);
-            curFuncInvocation->pushOperand(mPSInView, Operand::OPS_IN);
-            curFuncInvocation->pushOperand(curLightParams->mPSInToLightDir, Operand::OPS_IN, Operand::OPM_XYZ);
-            curFuncInvocation->pushOperand(curLightParams->mPSInDirection, Operand::OPS_IN, Operand::OPM_XYZ);
-            curFuncInvocation->pushOperand(curLightParams->mAttenuatParams, Operand::OPS_IN);
-            curFuncInvocation->pushOperand(curLightParams->mSpotParams, Operand::OPS_IN);
-            curFuncInvocation->pushOperand(curLightParams->mDiffuseColour, Operand::OPS_IN, Operand::OPM_XYZ);
-            curFuncInvocation->pushOperand(curLightParams->mSpecularColour, Operand::OPS_IN, Operand::OPM_XYZ);         
-            curFuncInvocation->pushOperand(mSurfaceShininess, Operand::OPS_IN);
-            curFuncInvocation->pushOperand(mPSTempDiffuseColour, Operand::OPS_IN, Operand::OPM_XYZ);    
-            curFuncInvocation->pushOperand(mPSTempSpecularColour, Operand::OPS_IN, Operand::OPM_XYZ);
-            curFuncInvocation->pushOperand(mPSTempDiffuseColour, Operand::OPS_OUT, Operand::OPM_XYZ);   
-            curFuncInvocation->pushOperand(mPSTempSpecularColour, Operand::OPS_OUT, Operand::OPM_XYZ);  
-            psMain->addAtomInstance(curFuncInvocation);         
-        }
-        else
-        {
-            curFuncInvocation = OGRE_NEW FunctionInvocation(SGX_FUNC_LIGHT_SPOT_DIFFUSE, groupOrder, internalCounter++);                        
-            curFuncInvocation->pushOperand(mPSNormal, Operand::OPS_IN);
-            curFuncInvocation->pushOperand(curLightParams->mPSInToLightDir, Operand::OPS_IN, Operand::OPM_XYZ);
-            curFuncInvocation->pushOperand(curLightParams->mPSInDirection, Operand::OPS_IN, Operand::OPM_XYZ);
-            curFuncInvocation->pushOperand(curLightParams->mAttenuatParams, Operand::OPS_IN);
-            curFuncInvocation->pushOperand(curLightParams->mSpotParams, Operand::OPS_IN);
-            curFuncInvocation->pushOperand(curLightParams->mDiffuseColour, Operand::OPS_IN, Operand::OPM_XYZ);                  
-            curFuncInvocation->pushOperand(mPSTempDiffuseColour, Operand::OPS_IN, Operand::OPM_XYZ);    
-            curFuncInvocation->pushOperand(mPSTempDiffuseColour, Operand::OPS_OUT, Operand::OPM_XYZ);   
-            psMain->addAtomInstance(curFuncInvocation); 
-        }
-        break;
-    }
-
-    return true;
-}
-
-//-----------------------------------------------------------------------
-bool NormalMapLighting::addPSFinalAssignmentInvocation( Function* psMain, const int groupOrder, int& internalCounter )
-{
-    FunctionInvocation* curFuncInvocation;
-
-    curFuncInvocation = OGRE_NEW FunctionInvocation(FFP_FUNC_ASSIGN, FFP_PS_COLOUR_BEGIN + 1, internalCounter++);                               
-    curFuncInvocation->pushOperand(mPSTempDiffuseColour, Operand::OPS_IN);  
-    curFuncInvocation->pushOperand(mPSDiffuse, Operand::OPS_OUT);   
-    psMain->addAtomInstance(curFuncInvocation); 
-
-    curFuncInvocation = OGRE_NEW FunctionInvocation(FFP_FUNC_ASSIGN, FFP_PS_COLOUR_BEGIN + 1, internalCounter++);                               
-    curFuncInvocation->pushOperand(mPSDiffuse, Operand::OPS_IN);    
-    curFuncInvocation->pushOperand(mPSOutDiffuse, Operand::OPS_OUT);    
-    psMain->addAtomInstance(curFuncInvocation);
-
-    if (mSpecularEnable)
-    {
-        curFuncInvocation = OGRE_NEW FunctionInvocation(FFP_FUNC_ASSIGN, FFP_PS_COLOUR_BEGIN + 1, internalCounter++); 
-        curFuncInvocation->pushOperand(mPSTempSpecularColour, Operand::OPS_IN);
-        curFuncInvocation->pushOperand(mPSSpecular, Operand::OPS_OUT);          
-        psMain->addAtomInstance(curFuncInvocation); 
-    }
-
-    return true;
-}
-
 
 //-----------------------------------------------------------------------
 void NormalMapLighting::copyFrom(const SubRenderState& rhs)
 {
     const NormalMapLighting& rhsLighting = static_cast<const NormalMapLighting&>(rhs);
 
-    int lightCount[3];
-
-    rhsLighting.getLightCount(lightCount);
-    setLightCount(lightCount);
+    setLightCount(rhsLighting.getLightCount());
 
     mTrackVertexColourType = rhsLighting.mTrackVertexColourType;
     mSpecularEnable = rhsLighting.mSpecularEnable;
     mNormalMapSpace = rhsLighting.mNormalMapSpace;
     mNormalMapTextureName = rhsLighting.mNormalMapTextureName;
-    mNormalMapMinFilter = rhsLighting.mNormalMapMinFilter;
-    mNormalMapMagFilter = rhsLighting.mNormalMapMagFilter;
-    mNormalMapMipFilter = rhsLighting.mNormalMapMipFilter;
-    mNormalMapMipBias = rhsLighting.mNormalMapMipBias;
+    mNormalMapSampler = rhsLighting.mNormalMapSampler;
 }
 
 //-----------------------------------------------------------------------
 bool NormalMapLighting::preAddToRenderState(const RenderState* renderState, Pass* srcPass, Pass* dstPass)
 {
-    if (srcPass->getLightingEnabled() == false)
+    if (!PerPixelLighting::preAddToRenderState(renderState, srcPass, dstPass))
         return false;
-
-    int lightCount[3];
-
-    renderState->getLightCount(lightCount);
 
     TextureUnitState* normalMapTexture = dstPass->createTextureUnitState();
 
-    normalMapTexture->setTextureName(mNormalMapTextureName);    
-    normalMapTexture->setTextureFiltering(mNormalMapMinFilter, mNormalMapMagFilter, mNormalMapMipFilter);
-    normalMapTexture->setTextureAnisotropy(mNormalMapAnisotropy);
-    normalMapTexture->setTextureMipmapBias(mNormalMapMipBias);
+    normalMapTexture->setTextureName(mNormalMapTextureName);
+    normalMapTexture->setSampler(mNormalMapSampler);
     mNormalMapSamplerIndex = dstPass->getNumTextureUnitStates() - 1;
 
-    setTrackVertexColourType(srcPass->getVertexColourTracking());           
-
-    if (srcPass->getShininess() > 0.0 &&
-        srcPass->getSpecular() != ColourValue::Black)
-    {
-        setSpecularEnable(true);
-    }
-    else
-    {
-        setSpecularEnable(false);   
-    }
-
-    // Case this pass should run once per light(s) -> override the light policy.
-    if (srcPass->getIteratePerLight())
-    {       
-
-        // This is the preferred case -> only one type of light is handled.
-        if (srcPass->getRunOnlyForOneLightType())
-        {
-            if (srcPass->getOnlyLightType() == Light::LT_POINT)
-            {
-                lightCount[0] = srcPass->getLightCountPerIteration();
-                lightCount[1] = 0;
-                lightCount[2] = 0;
-            }
-            else if (srcPass->getOnlyLightType() == Light::LT_DIRECTIONAL)
-            {
-                lightCount[0] = 0;
-                lightCount[1] = srcPass->getLightCountPerIteration();
-                lightCount[2] = 0;
-            }
-            else if (srcPass->getOnlyLightType() == Light::LT_SPOTLIGHT)
-            {
-                lightCount[0] = 0;
-                lightCount[1] = 0;
-                lightCount[2] = srcPass->getLightCountPerIteration();
-            }
-        }
-
-        // This is worse case -> all light types expected to be handled.
-        // Can not handle this request in efficient way - throw an exception.
-        else
-        {
-            OGRE_EXCEPT(Exception::ERR_INVALIDPARAMS,
-                "Using iterative lighting method with RT Shader System requires specifying explicit light type.",
-                "NormalMapLighting::preAddToRenderState");          
-        }
-    }
-
-    setLightCount(lightCount);
+    if(mNormalMapSpace == NMS_PARALLAX)
+        mSpecularEnable = true;
 
     return true;
 }
-
-//-----------------------------------------------------------------------
-void NormalMapLighting::setLightCount(const int lightCount[3])
-{
-    for (int type=0; type < 3; ++type)
-    {
-        for (int i=0; i < lightCount[type]; ++i)
-        {
-            LightParams curParams;
-
-            if (type == 0)
-                curParams.mType = Light::LT_POINT;
-            else if (type == 1)
-                curParams.mType = Light::LT_DIRECTIONAL;
-            else if (type == 2)
-                curParams.mType = Light::LT_SPOTLIGHT;
-
-            mLightParamsList.push_back(curParams);
-        }
-    }           
-}
-
-//-----------------------------------------------------------------------
-void NormalMapLighting::getLightCount(int lightCount[3]) const
-{
-    lightCount[0] = 0;
-    lightCount[1] = 0;
-    lightCount[2] = 0;
-
-    for (unsigned int i=0; i < mLightParamsList.size(); ++i)
-    {
-        const LightParams curParams = mLightParamsList[i];
-
-        if (curParams.mType == Light::LT_POINT)
-            lightCount[0]++;
-        else if (curParams.mType == Light::LT_DIRECTIONAL)
-            lightCount[1]++;
-        else if (curParams.mType == Light::LT_SPOTLIGHT)
-            lightCount[2]++;
-    }
-}
-
 
 //-----------------------------------------------------------------------
 const String& NormalMapLightingFactory::getType() const
@@ -1278,6 +580,11 @@ SubRenderState* NormalMapLightingFactory::createInstance(ScriptCompiler* compile
                     {
                         normalMapSubRenderState->setNormalMapSpace(NormalMapLighting::NMS_OBJECT);
                     }
+
+                    if (strValue == "parallax")
+                    {
+                        normalMapSubRenderState->setNormalMapSpace(NormalMapLighting::NMS_PARALLAX);
+                    }
                 }
 
                 // Read texture coordinate index.
@@ -1294,7 +601,7 @@ SubRenderState* NormalMapLightingFactory::createInstance(ScriptCompiler* compile
 
                 // Read texture filtering format.
                 if (prop->values.size() >= 5)
-                {                   
+                {
                     ++it;
                     if (false == SGScriptTranslator::getString(*it, &strValue))
                     {
@@ -1321,6 +628,14 @@ SubRenderState* NormalMapLightingFactory::createInstance(ScriptCompiler* compile
                     {
                         normalMapSubRenderState->setNormalMapFiltering(FO_ANISOTROPIC, FO_ANISOTROPIC, FO_LINEAR);
                     }
+                    else
+                    {
+                        // sampler reference
+                        normalMapSubRenderState->setNormalMapSampler(TextureManager::getSingleton().getSampler(strValue));
+                        return subRenderState;
+                    }
+
+                    compiler->addError(ScriptCompiler::CE_DEPRECATEDSYMBOL, prop->file, prop->line, "use sampler reference");
                 }
 
                 // Read max anisotropy value.

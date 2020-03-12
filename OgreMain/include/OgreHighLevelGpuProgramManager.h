@@ -50,10 +50,10 @@ namespace Ogre {
         virtual ~HighLevelGpuProgramFactory();
         /// Get the name of the language this factory creates programs for
         virtual const String& getLanguage(void) const = 0;
-        virtual HighLevelGpuProgram* create(ResourceManager* creator, 
+        virtual GpuProgram* create(ResourceManager* creator,
             const String& name, ResourceHandle handle,
             const String& group, bool isManual, ManualResourceLoader* loader) = 0;
-        virtual void destroy(HighLevelGpuProgram* prog) = 0;
+        virtual void destroy(GpuProgram* prog) { delete prog; }
     };
 
     /** This ResourceManager manages high-level vertex and fragment programs. 
@@ -73,15 +73,15 @@ namespace Ogre {
         : public ResourceManager, public Singleton<HighLevelGpuProgramManager>
     {
     public:
-        typedef map<String, HighLevelGpuProgramFactory*>::type FactoryMap;
+        typedef std::map<String, HighLevelGpuProgramFactory*> FactoryMap;
     protected:
         /// Factories capable of creating HighLevelGpuProgram instances
         FactoryMap mFactories;
 
         /// Factory for dealing with programs for languages we can't create
-        HighLevelGpuProgramFactory* mNullFactory;
+        std::unique_ptr<HighLevelGpuProgramFactory> mNullFactory;
         /// Factory for unified high-level programs
-        HighLevelGpuProgramFactory* mUnifiedFactory;
+        std::unique_ptr<HighLevelGpuProgramFactory> mUnifiedFactory;
 
         HighLevelGpuProgramFactory* getFactory(const String& language);
 
@@ -102,12 +102,7 @@ namespace Ogre {
 
         /// Get a resource by name
         /// @see ResourceManager::getResourceByName
-        HighLevelGpuProgramPtr
-#if OGRE_RESOURCEMANAGER_STRICT
-        getByName(const String& name, const String& groupName);
-#else
-        getByName(const String& name, const String& groupName = ResourceGroupManager::AUTODETECT_RESOURCE_GROUP_NAME);
-#endif
+        HighLevelGpuProgramPtr getByName(const String& name, const String& groupName OGRE_RESOURCE_GROUP_INIT);
 
         /** Create a new, unloaded HighLevelGpuProgram. 
         @par

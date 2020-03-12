@@ -27,12 +27,8 @@ THE SOFTWARE.
 */
 #include "OgreStableHeaders.h"
 #include "OgreInstanceBatchShader.h"
-#include "OgreSubMesh.h"
 #include "OgreRenderOperation.h"
-#include "OgreHardwareBufferManager.h"
 #include "OgreInstancedEntity.h"
-#include "OgreTechnique.h"
-#include "OgreLogManager.h"
 
 namespace Ogre
 {
@@ -96,12 +92,11 @@ namespace Ogre
                         if((retVal < 3 && entry->paramType == GpuProgramParameters::ACT_WORLD_MATRIX_ARRAY_3x4) ||
                             (retVal < 2 && entry->paramType == GpuProgramParameters::ACT_WORLD_DUALQUATERNION_ARRAY_2x4))
                         {
-                            LogManager::getSingleton().logMessage( "InstanceBatchShader: Mesh " +
-                                        mMeshReference->getName() + " using material " +
-                                        mMaterial->getName() + " contains many bones. The amount of "
+                            LogManager::getSingleton().logWarning( "InstanceBatchShader: Mesh '" +
+                                        mMeshReference->getName() + "' using material '" +
+                                        mMaterial->getName() + "'. The amount of possible "
                                         "instances per batch is very low. Performance benefits will "
-                                        "be minimal, if any. It might be even slower!",
-                                        LML_NORMAL );
+                                        "be minimal, if any. It might be even slower!");
                         }
 
                         return retVal;
@@ -168,8 +163,10 @@ namespace Ogre
             HardwareVertexBufferSharedPtr baseVertexBuffer =
                                                     baseVertexData->vertexBufferBinding->getBuffer(i);
 
-            char* thisBuf = static_cast<char*>(vertexBuffer->lock(HardwareBuffer::HBL_DISCARD));
-            char* baseBuf = static_cast<char*>(baseVertexBuffer->lock(HardwareBuffer::HBL_READ_ONLY));
+            HardwareBufferLockGuard thisLock(vertexBuffer, HardwareBuffer::HBL_DISCARD);
+            HardwareBufferLockGuard baseLock(baseVertexBuffer, HardwareBuffer::HBL_READ_ONLY);
+            char* thisBuf = static_cast<char*>(thisLock.pData);
+            char* baseBuf = static_cast<char*>(baseLock.pData);
 
             //Copy and repeat
             for( size_t j=0; j<mInstancesPerBatch; ++j )
@@ -178,9 +175,6 @@ namespace Ogre
                                             baseVertexData->vertexDeclaration->getVertexSize(i);
                 memcpy( thisBuf + j * sizeOfBuffer, baseBuf, sizeOfBuffer );
             }
-
-            baseVertexBuffer->unlock();
-            vertexBuffer->unlock();
         }
 
         {
@@ -193,7 +187,8 @@ namespace Ogre
                                             HardwareBuffer::HBU_STATIC_WRITE_ONLY );
             thisVertexData->vertexBufferBinding->setBinding( lastSource, vertexBuffer );
 
-            char* thisBuf = static_cast<char*>(vertexBuffer->lock(HardwareBuffer::HBL_DISCARD));
+            HardwareBufferLockGuard thisLock(vertexBuffer, HardwareBuffer::HBL_DISCARD);
+            char* thisBuf = static_cast<char*>(thisLock.pData);
             for( uint8 j=0; j<uint8(mInstancesPerBatch); ++j )
             {
                 for( size_t k=0; k<baseVertexData->vertexCount; ++k )
@@ -205,7 +200,6 @@ namespace Ogre
                 }
             }
 
-            vertexBuffer->unlock();
         }
     }
     //-----------------------------------------------------------------------
@@ -225,29 +219,24 @@ namespace Ogre
         if( mRenderOperation.vertexData->vertexCount > 65535 )
             indexType = HardwareIndexBuffer::IT_32BIT;
         thisIndexData->indexBuffer = HardwareBufferManager::getSingleton().createIndexBuffer(
-                                                    indexType, thisIndexData->indexCount,
-                                                    HardwareBuffer::HBU_STATIC_WRITE_ONLY );
+            indexType, thisIndexData->indexCount, HardwareBuffer::HBU_STATIC_WRITE_ONLY );
 
-        void *buf           = thisIndexData->indexBuffer->lock( HardwareBuffer::HBL_DISCARD );
-        void const *baseBuf = baseIndexData->indexBuffer->lock( HardwareBuffer::HBL_READ_ONLY );
-
-        uint16 *thisBuf16 = static_cast<uint16*>(buf);
-        uint32 *thisBuf32 = static_cast<uint32*>(buf);
+        HardwareBufferLockGuard thisLock(thisIndexData->indexBuffer, HardwareBuffer::HBL_DISCARD);
+        HardwareBufferLockGuard baseLock(baseIndexData->indexBuffer, HardwareBuffer::HBL_READ_ONLY);
+        uint16 *thisBuf16 = static_cast<uint16*>(thisLock.pData);
+        uint32 *thisBuf32 = static_cast<uint32*>(thisLock.pData);
+        bool baseIndex16bit = baseIndexData->indexBuffer->getType() == HardwareIndexBuffer::IT_16BIT;
 
         for( size_t i=0; i<mInstancesPerBatch; ++i )
         {
             const size_t vertexOffset = i * mRenderOperation.vertexData->vertexCount / mInstancesPerBatch;
 
-            uint16 const *initBuf16 = static_cast<uint16 const *>(baseBuf);
-            uint32 const *initBuf32 = static_cast<uint32 const *>(baseBuf);
+            const uint16 *initBuf16 = static_cast<const uint16 *>(baseLock.pData);
+            const uint32 *initBuf32 = static_cast<const uint32 *>(baseLock.pData);
 
             for( size_t j=0; j<baseIndexData->indexCount; ++j )
             {
-                uint32 originalVal;
-                if( baseSubMesh->indexData->indexBuffer->getType() == HardwareIndexBuffer::IT_16BIT )
-                    originalVal = *initBuf16++;
-                else
-                    originalVal = *initBuf32++;
+                uint32 originalVal = baseIndex16bit ? *initBuf16++ : *initBuf32++;
 
                 if( indexType == HardwareIndexBuffer::IT_16BIT )
                     *thisBuf16++ = static_cast<uint16>(originalVal + vertexOffset);
@@ -255,9 +244,6 @@ namespace Ogre
                     *thisBuf32++ = static_cast<uint32>(originalVal + vertexOffset);
             }
         }
-
-        baseIndexData->indexBuffer->unlock();
-        thisIndexData->indexBuffer->unlock();
     }
     //-----------------------------------------------------------------------
     void InstanceBatchShader::setupHardwareSkinned( const SubMesh* baseSubMesh, VertexData *thisVertexData,
@@ -283,8 +269,10 @@ namespace Ogre
             HardwareVertexBufferSharedPtr baseVertexBuffer =
                                                     baseVertexData->vertexBufferBinding->getBuffer(i);
 
-            char* thisBuf = static_cast<char*>(vertexBuffer->lock(HardwareBuffer::HBL_DISCARD));
-            char* baseBuf = static_cast<char*>(baseVertexBuffer->lock(HardwareBuffer::HBL_READ_ONLY));
+            HardwareBufferLockGuard thisVertexLock(vertexBuffer, HardwareBuffer::HBL_DISCARD);
+            HardwareBufferLockGuard baseVertexLock(baseVertexBuffer, HardwareBuffer::HBL_READ_ONLY);
+            char* thisBuf = static_cast<char*>(thisVertexLock.pData);
+            char* baseBuf = static_cast<char*>(baseVertexLock.pData);
             char *startBuf = baseBuf;
 
             //Copy and repeat
@@ -318,9 +306,6 @@ namespace Ogre
                     baseBuf += baseVertexData->vertexDeclaration->getVertexSize(i);
                 }
             }
-
-            baseVertexBuffer->unlock();
-            vertexBuffer->unlock();
         }
     }
     //-----------------------------------------------------------------------

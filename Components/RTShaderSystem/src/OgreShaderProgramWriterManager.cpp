@@ -26,8 +26,7 @@ THE SOFTWARE.
 -----------------------------------------------------------------------------
 */
 
-#include "OgreShaderProgramWriterManager.h"
-#include "OgreException.h"
+#include "OgreShaderPrecompiledHeaders.h"
 
 namespace Ogre {
 
@@ -89,10 +88,9 @@ ProgramWriter* ProgramWriterManager::createProgramWriter( const String& language
     {
         return (it->second)->create();
     }
-    
-    OGRE_EXCEPT( Exception::ERR_ITEM_NOT_FOUND,
-        "Could not create ShaderProgramWriter unknown language ", 
-        "ShaderProgramWriterManager::createProgramWriter" );
+
+    OGRE_EXCEPT(Exception::ERR_ITEM_NOT_FOUND,
+                "No ShaderProgramWriter for language '" + language + "' found");
 }
 
 }
